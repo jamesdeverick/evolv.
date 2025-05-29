@@ -20,31 +20,6 @@ st.title("evolv. agency SEO virtual assistant")
 st.image("https://placehold.co/150x50/000000/FFFFFF?text=evolv.%20Logo", caption="evolv. agency Logo", use_container_width=True)
 st.markdown("Uses AI and Scrapingdog to quickly generate detailed content briefs for your SEO needs.")
 
-# --- Check for litellm and Ollama setup ---
-LITELLM_AVAILABLE = True
-try:
-    # Test if llama3 model is available by making a dummy call.
-    # Increased timeout for initial connection test
-    test_response = completion(
-        model="ollama/llama3",
-        messages=[{"role": "user", "content": "hello"}],
-        stream=False,
-        timeout=10,
-        api_base="http://localhost:11434" # Explicitly pass api_base for Ollama
-    )
-    if test_response and test_response.choices and test_response.choices[0].message.content:
-        st.success("Ollama Llama 3 is configured and running!")
-    else:
-        raise Exception("LiteLLM test call to Ollama Llama 3 failed to return expected content.")
-except ImportError:
-    LITELLM_AVAILABLE = False
-    st.warning("Warning: `litellm` library not found. LLM features will be disabled. Please install it with `pip install litellm`.")
-except Exception as e:
-    LITELLM_AVAILABLE = False
-    st.warning(f"Warning: Ollama Llama 3 not properly configured/running. LLM features will be disabled. Error: {e}")
-    st.info("Please ensure Ollama is running (`ollama run llama3`) and accessible on `http://localhost:11434`.")
-
-
 # --- Configuration & Setup ---
 
 # Scrapingdog API key
@@ -58,6 +33,20 @@ if not scrapingdog_api_key:
     st.error("Scrapingdog API key not found. Please set it in .streamlit/secrets.toml or as an environment variable (SCRAPINGDOG_API_KEY).")
     st.stop()
 
+# Deepseek API key
+deepseek_api_key = None
+try:
+    deepseek_api_key = st.secrets["DEEPSEEK_API_KEY"]
+except (AttributeError, KeyError):
+    deepseek_api_key = os.getenv("DEEPSEEK_API_KEY")
+
+# Check if LLM is available (now depends on Deepseek API key)
+LITELLM_AVAILABLE = bool(deepseek_api_key)
+if not LITELLM_AVAILABLE:
+    st.warning("Warning: Deepseek API key not found. LLM features will be disabled. Please set DEEPSEEK_API_KEY in your Streamlit secrets.")
+    # Stop the app if LLM is critical and not available
+    # st.stop() # Uncomment this if you want the app to stop if LLM is not configured
+
 # Initialize session state for multi-step process
 if 'current_step' not in st.session_state:
     st.session_state.current_step = 1
@@ -68,7 +57,7 @@ if 'query_topic' not in st.session_state:
 if 'client_name' not in st.session_state:
     st.session_state.client_name = "Client X"
 if 'project_name' not in st.session_state:
-    st.session_state.project_name = "" # Will be auto-populated
+    st.session_session_state.project_name = "" # Will be auto-populated
 if 'page_type' not in st.session_state:
     st.session_state.page_type = "" # Will be auto-populated
 if 'seo_rationale' not in st.session_state:
@@ -383,8 +372,10 @@ class DataAnalyzer:
         self.serp_analyst = SERPAnalyst(api_key) # Instantiate SERPAnalyst here
 
     def brainstorm_keywords_with_llm(self, query_topic, initial_keywords, serp_data, category=None):
+        global deepseek_api_key # Access the global deepseek_api_key
+
         if not LITELLM_AVAILABLE:
-            st.error("LLM features are disabled because `litellm` is not installed or Ollama/Llama3 is not running.")
+            st.error("LLM features are disabled because Deepseek API key is not configured.")
             return []
 
         serp_data_str = "\n".join([
@@ -399,8 +390,6 @@ class DataAnalyzer:
             category_context = f" for content categorized as '{category_display_name}'"
             category_for_prompt_sentence = f"Consider the typical language and focus of {category_display_name} content."
 
-        # MODIFIED PROMPT: This prompt is for the *initial keyword brainstorming*
-        # It still returns a JSON array of strings as per original design.
         prompt = f"""You are an expert SEO content strategist and keyword brainstormer. Your task is to generate a comprehensive list of potential SEO keywords, long-tail phrases, and related concepts based on the provided initial keywords and SERP data{category_context}.
         The main topic for this analysis is: "{query_topic}".
 
@@ -437,26 +426,26 @@ class DataAnalyzer:
         """
 
         st.markdown("#### LLM Prompt Details (Keyword Brainstorming):")
-        with st.expander("Click to view the full prompt sent to Llama 3 for keyword brainstorming"):
+        with st.expander("Click to view the full prompt sent to Deepseek for keyword brainstorming"):
             st.code(prompt, language='markdown')
 
         try:
             response = completion(
-                model='ollama/llama3',
+                model="deepseek/deepseek-chat", # Using deepseek-chat model
                 messages=[{
                     "role": "user",
                     "content": prompt
                 }],
                 temperature=0.7,
                 max_tokens=700,
-                api_base="http://localhost:11434" # Explicitly pass api_base for Ollama
+                api_key=deepseek_api_key # Pass the Deepseek API key
             )
 
             if isinstance(response, ModelResponse) and hasattr(response, 'choices') and len(response.choices) > 0:
                 raw_llm_output = response.choices[0].message.content
 
-                st.markdown("#### Raw Llama 3 Output (Keyword Brainstorming):")
-                with st.expander("Click to view the raw (unprocessed) output from Llama 3 for keyword brainstorming"):
+                st.markdown("#### Raw Deepseek Output (Keyword Brainstorming):")
+                with st.expander("Click to view the raw (unprocessed) output from Deepseek for keyword brainstorming"):
                     st.code(raw_llm_output, language='text')
 
                 try:
@@ -466,41 +455,37 @@ class DataAnalyzer:
                     if json_start != -1 and json_end != -1 and json_end > json_start:
                         json_string = raw_llm_output[json_start : json_end + 1]
                         
-                        # --- MODIFIED LOGIC HERE TO HANDLE LLM'S UNEXPECTED JSON FORMAT ---
                         llm_raw_parsed_output = json.loads(json_string)
                         llm_suggested_keywords = []
 
                         if isinstance(llm_raw_parsed_output, list):
                             for item in llm_raw_parsed_output:
                                 if isinstance(item, dict) and len(item) == 1:
-                                    # Extract the single key from the dictionary
                                     keyword_from_llm = list(item.keys())[0]
                                     llm_suggested_keywords.append(keyword_from_llm)
                                 elif isinstance(item, str):
-                                    # Handle cases where it might correctly return a string directly
                                     llm_suggested_keywords.append(item)
-                                elif isinstance(item, list) and len(item) == 1 and isinstance(item[0], str): # NEW: Handle list containing a single string
+                                elif isinstance(item, list) and len(item) == 1 and isinstance(item[0], str):
                                     llm_suggested_keywords.append(item[0])
                                 else:
                                     st.warning(f"Unexpected item format in LLM output: {item}. Skipping.")
                             return llm_suggested_keywords
                         else:
-                            st.warning("LLaMA 3 returned valid JSON, but it was not a list as expected. Please check the prompt instruction.")
+                            st.warning("Deepseek returned valid JSON, but it was not a list as expected. Please check the prompt instruction.")
                             return []
-                        # --- END MODIFIED LOGIC ---
 
                     else:
-                        st.error(f"Could not find a valid JSON array ([...]) in the LLaMA 3 output. Raw output: `{raw_llm_output}`")
+                        st.error(f"Could not find a valid JSON array ([...]) in the Deepseek output. Raw output: `{raw_llm_output}`")
                         return []
 
                 except json.JSONDecodeError as e:
-                    st.error(f"LLaMA 3 output was not valid JSON after extraction attempt: {e}. Extracted string: `{json_string}`")
+                    st.error(f"Deepseek output was not valid JSON after extraction attempt: {e}. Extracted string: `{json_string}`")
                     return []
             else:
-                st.warning("LLaMA 3 did not return any choices in the response.")
+                st.warning("Deepseek did not return any choices in the response.")
                 return []
         except Exception as e:
-            st.error(f"Error during LLaMA 3 keyword brainstorming: {e}")
+            st.error(f"Error during Deepseek keyword brainstorming: {e}")
             return []
 
     def _infer_content_type_simple_heuristic(self, keyword):
@@ -548,19 +533,40 @@ class DataAnalyzer:
                     """
                     try:
                         llm_serp_response = completion(
-                            model='ollama/llama3',
+                            model="deepseek/deepseek-chat", # Using deepseek-chat model
                             messages=[{"role": "user", "content": serp_analysis_prompt}],
                             temperature=0.5,
                             max_tokens=500,
-                            api_base="http://localhost:11434"
+                            api_key=deepseek_api_key # Pass the Deepseek API key
                         )
                         raw_serp_llm_output = llm_serp_response.choices[0].message.content
-                        serp_insights = json.loads(raw_serp_llm_output)
-                        if not isinstance(serp_insights, dict) or not all(k in serp_insights for k in ["common_themes", "gaps_to_exploit", "unique_angles"]):
-                            st.warning("LLM returned SERP insights in an unexpected format. Using default insights.")
-                            serp_insights = None # Reset if format is wrong
+                        
+                        st.markdown("#### Raw Deepseek Output (SERP Insights):")
+                        with st.expander("Click to view the raw (unprocessed) output from Deepseek for SERP insights"):
+                            st.code(raw_serp_llm_output, language='text')
+
+                        # Robust JSON extraction
+                        json_start = raw_serp_llm_output.find('{')
+                        json_end = raw_serp_llm_output.rfind('}')
+
+                        if json_start != -1 and json_end != -1 and json_end > json_start:
+                            json_string = raw_serp_llm_output[json_start : json_end + 1]
+                            serp_insights = json.loads(json_string)
+                            
+                            if not isinstance(serp_insights, dict) or not all(k in serp_insights for k in ["common_themes", "gaps_to_exploit", "unique_angles"]):
+                                st.warning("LLM returned SERP insights in an unexpected format. Using default insights.")
+                                serp_insights = None # Reset if format is wrong
+                            else:
+                                st.info(f"Successfully parsed SERP insights: {serp_insights}")
+                        else:
+                            st.warning(f"Could not find a valid JSON object ({{...}}) in the Deepseek output for SERP insights. Raw output: `{raw_serp_llm_output}`")
+                            serp_insights = None
+
+                    except json.JSONDecodeError as e:
+                        st.error(f"Deepseek output for SERP insights was not valid JSON after extraction attempt: {e}. Extracted string: `{json_string}`")
+                        serp_insights = None
                     except Exception as e:
-                        st.error(f"Error generating SERP insights with Llama 3: {e}. Proceeding without detailed SERP insights.")
+                        st.error(f"Error generating SERP insights with Deepseek: {e}. Proceeding without detailed SERP insights.")
                         serp_insights = None
                 else:
                     st.info("No detailed SERP results to analyze for insights. Proceeding without detailed SERP insights.")
@@ -568,7 +574,7 @@ class DataAnalyzer:
             st.info("LLM unavailable for SERP insights. Proceeding without detailed SERP insights.")
 
         # Step 2: LLM brainstorms keywords based on initial Scrapingdog data and now, SERP insights
-        with st.spinner("Brainstorming keywords with Llama 3... This may take a moment."):
+        with st.spinner("Brainstorming keywords with Deepseek... This may take a moment."):
             llm_brainstormed_keywords = self.brainstorm_keywords_with_llm(query_topic, related_searches, organic_results_data)
             if not llm_brainstormed_keywords:
                 st.error("LLM brainstorming failed to produce keywords.")
@@ -680,6 +686,8 @@ class ContentBriefCreator:
     # for all sections that the LLM is responsible for.
     def create_content_brief(self, keyword, related_keywords=None, category=None, content_type=None,
                              audience_data=None, serp_insights=None, word_count_range=None):
+        global deepseek_api_key # Access the global deepseek_api_key
+
         category_context = ""
         if category:
             category_context = f" for content categorized as '{category.replace('_', ' ').lower()}'"
@@ -800,33 +808,34 @@ class ContentBriefCreator:
         ---
         """
         st.markdown("#### LLM Prompt Details (Content Brief Generation):")
-        with st.expander("Click to view the full prompt sent to Llama 3 for brief generation"):
+        with st.expander("Click to view the full prompt sent to Deepseek for brief generation"):
             st.code(prompt, language='markdown')
 
         try:
             response = completion(
-                model='ollama/llama3',
+                model="deepseek/deepseek-chat", # Using deepseek-chat model
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.7,
                 max_tokens=2000, # Increased max_tokens to allow for a more detailed brief
-                timeout=120 # Increased timeout to 120 seconds
+                timeout=120, # Increased timeout to 120 seconds
+                api_key=deepseek_api_key # Pass the Deepseek API key
             )
 
             if hasattr(response, 'choices') and len(response.choices) > 0:
                 generated_content = response.choices[0].message.content
                 if not generated_content.strip(): # Check if content is empty after stripping whitespace
-                    st.error("LLaMA 3 returned an empty response for content brief creation.")
-                    return "No valid response from LLaMA 3 for content brief creation."
+                    st.error("Deepseek returned an empty response for content brief creation.")
+                    return "No valid response from Deepseek for content brief creation."
                 return generated_content
             else:
-                st.warning("LLaMA 3 did not return any choices in the response for content brief creation.")
-                return "No valid response from LLaMA 3 for content brief creation."
+                st.warning("Deepseek did not return any choices in the response for content brief creation.")
+                return "No valid response from Deepseek for content brief creation."
         except litellm.exceptions.Timeout as e:
             st.error(f"LLM call timed out: {e}. The model took too long to respond. Please try again or simplify the prompt.")
-            return "Error during LLaMA 3 content brief creation: Timeout."
+            return "Error during Deepseek content brief creation: Timeout."
         except Exception as e:
-            st.error(f"An unexpected error occurred during LLaMA 3 content brief creation: {e}")
-            return f"Error during LLaMA 3 content brief creation: {e}"
+            st.error(f"An unexpected error occurred during Deepseek content brief creation: {e}")
+            return f"Error during Deepseek content brief creation: {e}"
 
 # --- Streamlit Application Layout and Logic ---
 
@@ -994,7 +1003,7 @@ if st.session_state.current_step == 3:
         # Use SERP insights stored in session state from DataAnalyzer.orchestrator
         serp_insights_for_brief = st.session_state.get('serp_insights', None)
 
-        with st.spinner("Generating detailed content brief with Llama 3... This might take a while."):
+        with st.spinner("Generating detailed content brief with Deepseek... This might take a while."):
             st.session_state.generated_brief_content = content_brief_creator.create_content_brief(
                 keyword=target_keyword,
                 related_keywords=st.session_state.related_keywords_for_brief,
