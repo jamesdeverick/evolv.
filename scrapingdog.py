@@ -57,7 +57,7 @@ if 'query_topic' not in st.session_state:
 if 'client_name' not in st.session_state:
     st.session_state.client_name = "Client X"
 if 'project_name' not in st.session_state:
-    st.session_session_state.project_name = "" # Will be auto-populated
+    st.session_state.project_name = "" # Will be auto-populated
 if 'page_type' not in st.session_state:
     st.session_state.page_type = "" # Will be auto-populated
 if 'seo_rationale' not in st.session_state:
