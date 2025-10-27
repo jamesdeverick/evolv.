@@ -1,7 +1,10 @@
-FROM nvidia/cuda:12.1.0-base-ubuntu22.04
+FROM ubuntu:22.04
 
 # Avoid prompts during package installation
 ENV DEBIAN_FRONTEND=noninteractive
+
+# Set CPU-only mode for Ollama (Railway doesn't have GPU)
+ENV OLLAMA_NUM_GPU=0
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
