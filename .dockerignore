@@ -1,0 +1,55 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Documentation (not needed in container)
+*.md
+!README.md
+
+# Logs
+*.log
+
+# Environment files (set via Railway dashboard)
+.env
+.env.local
+.env.example
+
+# Test files
+tests/
+*.test.py
+
+# Temporary files
+*.tmp
+*.bak
+
+# Large example files
+*.docx
+*.pdf
+crewai-311/

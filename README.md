@@ -52,6 +52,27 @@ A powerful SEO content planning tool that combines LLM analysis with real-time k
    streamlit run app.py
    ```
 
+### Cloud Deployment with Ollama (Railway) - **RECOMMENDED** 🚂
+
+Deploy with Ollama + Mistral to Railway for full control and better performance.
+
+**See detailed guide**: [RAILWAY_DEPLOYMENT.md](RAILWAY_DEPLOYMENT.md)
+
+**Quick setup**:
+1. Push code to GitHub
+2. Create Railway project: https://railway.app/new
+3. Connect GitHub repo
+4. Add environment variable: `SCRAPINGDOG_API_KEY`
+5. Deploy! (first deploy takes 10-20 min to download Mistral model)
+
+**Cost**: $5-20/month (includes $5 free credit)
+
+**Pros**:
+- ✅ Full Ollama + Mistral support
+- ✅ No API costs for LLM (runs locally in container)
+- ✅ Better privacy (models run on your instance)
+- ✅ Faster responses (no API latency)
+
 ### Cloud Deployment (HuggingFace Spaces)
 
 #### Option 1: Using Deepseek API (Recommended)
@@ -99,11 +120,13 @@ Your app wasn't starting on HuggingFace Spaces because:
 
 1. **Ollama requires a local server** - HuggingFace Spaces doesn't allow running background services
 2. **T4 GPU is irrelevant** - Ollama needs to be installed and running as a daemon
-3. **Solution**: Use cloud API providers (Deepseek or OpenAI) instead
+3. **Solution**: Use Railway (for Ollama) or cloud API providers (Deepseek/OpenAI)
 
 The refactored code now **automatically detects the environment** and switches between:
-- Local Ollama (for development)
-- Deepseek/OpenAI APIs (for cloud deployment)
+- **Ollama** (for local development or Railway/Docker deployment)
+- **Deepseek/OpenAI APIs** (for HuggingFace Spaces deployment)
+
+**Want to use Ollama in production?** Deploy to Railway - see [RAILWAY_DEPLOYMENT.md](RAILWAY_DEPLOYMENT.md)
 
 ## Configuration
 

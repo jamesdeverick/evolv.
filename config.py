@@ -5,10 +5,12 @@
 import os
 
 # ========== API Configuration ==========
-DEFAULT_LLM_PROVIDER = os.getenv("LLM_PROVIDER", "deepseek")  # "ollama" or "deepseek" or "openai"
+# Default to "ollama" for Railway/Docker deployments, or override with LLM_PROVIDER env var
+DEFAULT_LLM_PROVIDER = os.getenv("LLM_PROVIDER", "ollama")  # "ollama" or "deepseek" or "openai"
 
 # Ollama Configuration
-OLLAMA_API_BASE = os.getenv("OLLAMA_API_BASE", "http://127.0.0.1:11434")
+# Use localhost in Docker/Railway since Ollama runs in same container
+OLLAMA_API_BASE = os.getenv("OLLAMA_API_BASE", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "mistral:latest")
 
 # Deepseek Configuration (for cloud deployment)
