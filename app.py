@@ -744,7 +744,8 @@ Write the article in Markdown format. Begin now:"""
             claude_client = get_llm_client(provider="anthropic")
 
             if not claude_client.available:
-                st.error(f"Claude API not available: {claude_client.get_status().get('error', 'Unknown error')}")
+                st.error(f"❌ Claude API not available: {claude_client.get_status().get('error', 'Unknown error')}")
+                st.info("Make sure ANTHROPIC_API_KEY is set in your environment or enter it above.")
             else:
                 # Generate the content
                 st.session_state.drafted_content = claude_client.complete(
@@ -756,7 +757,15 @@ Write the article in Markdown format. Begin now:"""
                 if st.session_state.drafted_content and not st.session_state.drafted_content.startswith("Error"):
                     st.success("✅ Content draft generated successfully!")
                 else:
-                    st.error("Failed to generate content draft.")
+                    st.error("❌ Failed to generate content draft.")
+                    # Show the actual error for debugging
+                    with st.expander("Error Details"):
+                        st.code(st.session_state.drafted_content if st.session_state.drafted_content else "No response received")
+                        st.info("**Troubleshooting:**\n"
+                               "1. Check that ANTHROPIC_API_KEY is set correctly\n"
+                               "2. Verify your API key is valid at https://console.anthropic.com/\n"
+                               "3. Check you have API credits available\n"
+                               f"4. Current API key starts with: {ANTHROPIC_API_KEY[:10] if ANTHROPIC_API_KEY else 'NOT SET'}...")
 
     # Display and edit drafted content
     if st.session_state.drafted_content and not st.session_state.drafted_content.startswith("Error"):
