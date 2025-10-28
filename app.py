@@ -14,7 +14,9 @@ from config import (
     BRIEF_TONES,
     CONTENT_TYPES,
     SCRAPINGDOG_API_KEY,
-    DEFAULT_LLM_PROVIDER
+    DEFAULT_LLM_PROVIDER,
+    ANTHROPIC_API_KEY,
+    ANTHROPIC_MODEL
 )
 from api.llm_client import get_llm_client
 from api.scrapingdog_client import ScrapingdogClient, probe_scrapingdog_status
