@@ -1,5 +1,5 @@
 # --------------------------------------------
-# LLM Client - Unified interface for Ollama, Deepseek, OpenAI
+# LLM Client - Unified interface for Ollama, Deepseek, OpenAI, Anthropic
 # --------------------------------------------
 
 import json
@@ -20,6 +20,13 @@ from config import (
     ANTHROPIC_MODEL,
     LLM_TIMEOUT
 )
+
+# Import Anthropic SDK
+try:
+    from anthropic import Anthropic
+    ANTHROPIC_AVAILABLE = True
+except ImportError:
+    ANTHROPIC_AVAILABLE = False
 
 
 class LLMClient:
@@ -104,6 +111,11 @@ class LLMClient:
             self.error = "ANTHROPIC_API_KEY not configured"
             return
 
+        if not ANTHROPIC_AVAILABLE:
+            self.available = False
+            self.error = "anthropic package not installed. Run: pip install anthropic"
+            return
+
         self.model = ANTHROPIC_MODEL
         self.api_base = "https://api.anthropic.com"
         self.available = True
@@ -143,6 +155,8 @@ class LLMClient:
         try:
             if self.provider == "ollama":
                 return self._complete_ollama(prompt, temperature, max_tokens)
+            elif self.provider == "anthropic":
+                return self._complete_anthropic(prompt, temperature, max_tokens, system_prompt)
             else:
                 return self._complete_litellm(prompt, temperature, max_tokens, system_prompt)
         except Exception as e:
@@ -176,6 +190,33 @@ class LLMClient:
             return f"Error: Could not connect to Ollama at {self.api_base}"
         except Exception as e:
             return f"Error: {e}"
+
+    def _complete_anthropic(self, prompt: str, temperature: float,
+                           max_tokens: int, system_prompt: Optional[str] = None) -> str:
+        """Use direct Anthropic SDK for Claude models."""
+        try:
+            client = Anthropic(api_key=ANTHROPIC_API_KEY)
+
+            # Build messages
+            messages = [{"role": "user", "content": prompt}]
+
+            # Call the API
+            response = client.messages.create(
+                model=self.model,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                system=system_prompt if system_prompt else "You are a helpful assistant.",
+                messages=messages
+            )
+
+            # Extract text from response
+            if response.content and len(response.content) > 0:
+                return response.content[0].text
+
+            return "No response received from Claude."
+
+        except Exception as e:
+            return f"Error calling Anthropic API: {e}"
 
     def _complete_litellm(self, prompt: str, temperature: float,
                          max_tokens: int, system_prompt: Optional[str] = None) -> str:

@@ -28,7 +28,7 @@ OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4")
 
 # Anthropic/Claude Configuration (for content drafting)
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
-ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-3-5-sonnet-20240620")
+ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-3-5-sonnet-20241022")
 
 # Scrapingdog Configuration
 SCRAPINGDOG_API_KEY = os.getenv("SCRAPINGDOG_API_KEY", "")
