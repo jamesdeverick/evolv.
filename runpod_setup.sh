@@ -22,12 +22,18 @@ export LLM_PROVIDER="ollama"
 export OLLAMA_API_BASE="http://127.0.0.1:11434"
 export OLLAMA_MODEL="mistral:latest"
 
+# Set Anthropic API key (paste your key here)
+export ANTHROPIC_API_KEY="your_anthropic_api_key_here"
+
 # Add to .bashrc so they persist in new shells
 if ! grep -q "SCRAPINGDOG_API_KEY" ~/.bashrc; then
     echo 'export SCRAPINGDOG_API_KEY="68da907d6dcca4eb91ea8469"' >> ~/.bashrc
     echo 'export LLM_PROVIDER="ollama"' >> ~/.bashrc
     echo 'export OLLAMA_API_BASE="http://127.0.0.1:11434"' >> ~/.bashrc
     echo 'export OLLAMA_MODEL="mistral:latest"' >> ~/.bashrc
+    echo 'export ANTHROPIC_API_KEY="your_anthropic_api_key_here"' >> ~/.bashrc
+    echo "" >> ~/.bashrc
+    echo "# Update the ANTHROPIC_API_KEY above with your actual key" >> ~/.bashrc
 fi
 
 # 4. Start Ollama in background if not running
