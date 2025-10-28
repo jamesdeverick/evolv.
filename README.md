@@ -83,7 +83,31 @@ modal deploy modal_deploy.py
 
 ---
 
-### Option 2: Railway with Ollama (CPU Only)
+### Option 2: RunPod with GPU 🚀
+
+**Best for**: Self-hosted GPU deployment with full control
+
+Deploy to RunPod with NVIDIA GPU support for fast Ollama inference.
+
+**See detailed guide**: [RUNPOD_DEPLOYMENT.md](RUNPOD_DEPLOYMENT.md)
+
+**Quick setup**:
+1. Sign up at https://runpod.io
+2. Deploy pod with this Docker image or build from Dockerfile
+3. Add environment variable: `SCRAPINGDOG_API_KEY=your_key`
+4. Access via: `https://[pod-id]-7860.proxy.runpod.net`
+
+**Cost**: $0.39-0.89/hour GPU (stop when not in use!)
+
+**Why RunPod:**
+- ✅ Full GPU support (A4000, A5000, A6000, etc.)
+- ✅ Pay only when running
+- ✅ SSH access and persistent storage
+- ✅ Start/stop anytime
+
+---
+
+### Option 3: Railway with Ollama (CPU Only)
 
 Deploy with Ollama + Mistral to Railway - **CPU only, no GPU support**
 
