@@ -161,8 +161,37 @@ DEEPSEEK_API_KEY=your_deepseek_key
 4. **Stop pod** when not in use to save credits
 5. **Consider cloud LLM** for cost savings on CPU pods
 
+## Common Issue: "Not Ready" on Port 8888
+
+**Problem:** RunPod shows "Port 8888 - Jupyter Lab - Not Ready"
+
+**Solution:** The app runs on **port 7860**, not 8888!
+
+### Quick Fix:
+
+1. **Configure port 7860** in RunPod (not 8888)
+2. **Or access directly:** `https://[pod-id]-7860.proxy.runpod.net`
+3. **See:** [RUNPOD_QUICKSTART.md](RUNPOD_QUICKSTART.md) for detailed troubleshooting
+
+### First Startup (5-10 minutes)
+
+The first time you start the pod:
+- Ollama downloads Mistral model (~4GB)
+- This takes 5-10 minutes
+- Watch the logs for progress
+- Subsequent starts are fast (~30 seconds)
+
+### Check If It's Running
+
+```bash
+# SSH into pod or use terminal
+curl http://localhost:7860
+# Should return HTML if Streamlit is running
+```
+
 ## Support
 
 - RunPod Docs: https://docs.runpod.io/
 - Scrapingdog Dashboard: https://app.scrapingdog.com/dashboard
+- Quick troubleshooting: [RUNPOD_QUICKSTART.md](RUNPOD_QUICKSTART.md)
 - This repo's issues: https://github.com/jamesdeverick/evolv./issues
