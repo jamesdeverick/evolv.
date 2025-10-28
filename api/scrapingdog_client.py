@@ -171,13 +171,9 @@ class ScrapingdogClient:
         }
         status, body, data = sd_request(_self.base_url, params)
 
-        # Check for authentication errors
-        if status == 401:
-            st.error("❌ Scrapingdog API Authentication Failed!")
-            st.error("Your API key is invalid or has expired.")
-            st.info("📝 To fix this:\n1. Sign up or log in at https://www.scrapingdog.com/\n2. Go to your dashboard: https://app.scrapingdog.com/dashboard\n3. Copy your API key\n4. Update your .env file with: SCRAPINGDOG_API_KEY=your_actual_key\n5. Or enter it in the app when prompted")
-            with st.expander("API Response Details"):
-                st.code(body[:500])
+        # Check for authentication errors - gracefully fall back to LLM-only mode
+        if status in (401, 403):
+            st.warning(f"⚠ Scrapingdog auth failed ({status}). Check your API key in sidebar. Continuing in LLM-only mode.")
             return [], [], []
 
         if data:
@@ -253,12 +249,10 @@ class ScrapingdogClient:
         status, body, data = sd_request(_self.base_url, params)
         debug = []
 
-        # Check for authentication errors
-        if status == 401:
-            st.error("❌ Scrapingdog API Authentication Failed!")
-            st.error("Your API key is invalid or has expired.")
-            st.info("📝 To fix this:\n1. Sign up or log in at https://www.scrapingdog.com/\n2. Go to your dashboard: https://app.scrapingdog.com/dashboard\n3. Copy your API key\n4. Update your .env file with: SCRAPINGDOG_API_KEY=your_actual_key\n5. Or enter it in the app when prompted")
-            return [], {}, ["HTTP 401: Authentication failed"]
+        # Check for authentication errors - gracefully fall back to LLM-only mode
+        if status in (401, 403):
+            st.warning(f"⚠ Scrapingdog auth failed ({status}). Check your API key in sidebar. Continuing in LLM-only mode.")
+            return [], {}, [f"HTTP {status}: Authentication failed"]
 
         if data:
             serp = []

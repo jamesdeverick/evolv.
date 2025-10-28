@@ -40,16 +40,35 @@ st.markdown("Combines LLM audit analysis with real-time keyword research, SERP i
 
 
 # ========== Get API Keys ==========
-# Initialize API key in session state to persist across reruns
-if "scrapingdog_api_key" not in st.session_state:
-    st.session_state.scrapingdog_api_key = SCRAPINGDOG_API_KEY
-    try:
-        st.session_state.scrapingdog_api_key = st.session_state.scrapingdog_api_key or st.secrets.get("scrapingdog_api_key")
-    except Exception:
-        pass
+# Scrapingdog API key (ENV > secrets > UI override)
+def _sanitize_key(k):
+    """Strip quotes, whitespace, and validate key."""
+    if not k:
+        return None
+    k = str(k).strip()
+    # Strip accidental wrapping quotes
+    if (k.startswith('"') and k.endswith('"')) or (k.startswith("'") and k.endswith("'")):
+        k = k[1:-1].strip()
+    return k or None
 
-# Use session state value
-scrapingdog_api_key = st.session_state.scrapingdog_api_key
+def _mask(k):
+    """Mask API key for display."""
+    if not k:
+        return "[none]"
+    if len(k) <= 6:
+        return k[0] + "…"
+    return k[:2] + "…" + k[-4:]
+
+# Prefer ENV first (secrets might be stale/blank)
+env_key = _sanitize_key(os.getenv("SCRAPINGDOG_API_KEY"))
+
+secret_key = None
+try:
+    secret_key = _sanitize_key(st.secrets.get("scrapingdog_api_key", None))
+except Exception:
+    pass
+
+scrapingdog_api_key = env_key or secret_key
 
 
 # ========== Sidebar: LLM & Settings ==========
@@ -109,24 +128,32 @@ with st.sidebar.expander("Preview Tone of Voice text", expanded=False):
 
 
 # ========== Scrapingdog Status ==========
+st.sidebar.header("Scrapingdog API Key")
+# UI override (handy on RunPod)
+ui_key = _sanitize_key(
+    st.sidebar.text_input(
+        "Override API key (optional)",
+        type="password",
+        help="Paste to override env/secrets for this session"
+    )
+)
+if ui_key:
+    scrapingdog_api_key = ui_key
+
+st.sidebar.caption(f"Using key: {_mask(scrapingdog_api_key)}")
+
 if not scrapingdog_api_key:
-    st.error("Scrapingdog API key not found. Enter it below or set SCRAPINGDOG_API_KEY.")
-    entered_key = st.text_input("Enter Scrapingdog API Key:", type="password", key="scrapingdog_key_input")
-    if entered_key:
-        st.session_state.scrapingdog_api_key = entered_key
-        scrapingdog_api_key = entered_key
-        st.rerun()  # Rerun to use the new key
-    else:
-        st.stop()
+    st.error("Scrapingdog API key not found. Set SCRAPINGDOG_API_KEY env, put it in .streamlit/secrets.toml, or paste above.")
+    st.stop()
 
 st.sidebar.header("Scrapingdog Status")
 refresh = st.sidebar.button("Refresh Scrapingdog Check", use_container_width=True)
 if refresh:
-    probe_scrapingdog_status.clear()
-    st.rerun()  # Force rerun after clearing cache
+    probe_scrapingdog_status.clear()  # Clear cache
+    st.rerun()  # Ensure the new key flows everywhere
 
-# Always use the session state key
-status_info = probe_scrapingdog_status(st.session_state.scrapingdog_api_key)
+# Always use the current key
+status_info = probe_scrapingdog_status(scrapingdog_api_key)
 
 if status_info["ok"]:
     if status_info["http_status"] == 200:
@@ -172,8 +199,8 @@ init_state()
 # Note: Clients are re-instantiated with the current API key each time they're used
 # to ensure any UI-entered key is picked up
 def get_scrapingdog_client():
-    """Get Scrapingdog client with current API key from session state."""
-    return ScrapingdogClient(st.session_state.scrapingdog_api_key)
+    """Get Scrapingdog client with current API key."""
+    return ScrapingdogClient(scrapingdog_api_key)
 
 # Initialize non-API-dependent clients
 brief_creator = ContentBriefCreator()
