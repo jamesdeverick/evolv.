@@ -329,10 +329,18 @@ class KeywordClusterer:
             return {}
 
         prompt = (
-            "Group these keywords into semantic clusters (distinct topics/user intent):\n\n"
-            f"{', '.join(top_keywords)}\n\n"
-            'Return JSON: {"Cluster Name": ["kw1","kw2", ...], ...}. '
-            'Ensure each keyword appears exactly once.'
+            "Group these keywords into semantic clusters based on topic/user intent.\n\n"
+            f"Keywords: {', '.join(top_keywords)}\n\n"
+            "IMPORTANT: Return ONLY valid JSON with no extra text. Format:\n"
+            '{\n'
+            '  "Cluster Name 1": ["keyword1", "keyword2"],\n'
+            '  "Cluster Name 2": ["keyword3", "keyword4"]\n'
+            '}\n\n'
+            "Rules:\n"
+            "- Use double quotes only\n"
+            "- No trailing commas\n"
+            "- Each keyword appears exactly once\n"
+            "- Create 3-5 meaningful clusters"
         )
 
         try:
@@ -347,7 +355,31 @@ class KeywordClusterer:
                 end = raw.rfind("}") + 1
                 s = raw[start:end] if start >= 0 and end > start else "{}"
 
-            clusters = json.loads(s)
+            # Try to repair common JSON issues
+            s = s.strip()
+            # Remove trailing commas before closing braces/brackets
+            s = re.sub(r',(\s*[}\]])', r'\1', s)
+            # Fix single quotes to double quotes (but preserve apostrophes in words)
+            s = re.sub(r"(?<!\w)'([^']*)'(?=\s*[,:\]\}])", r'"\1"', s)
+
+            try:
+                clusters = json.loads(s)
+            except json.JSONDecodeError as json_err:
+                # Show the problematic JSON for debugging
+                st.warning(f"LLM returned invalid JSON. Attempting fallback clustering...")
+                with st.expander("Debug: Invalid JSON from LLM"):
+                    st.code(s)
+                    st.error(f"JSON Error: {json_err}")
+
+                # Fallback: create simple clusters based on first word
+                clusters = {}
+                for i, kw in enumerate(top_keywords):
+                    cluster_name = f"Cluster {(i // 5) + 1}"
+                    if cluster_name not in clusters:
+                        clusters[cluster_name] = []
+                    clusters[cluster_name].append(kw)
+
+                st.info(f"Created {len(clusters)} fallback clusters with ~5 keywords each.")
 
             # Clean and deduplicate
             seen = set()
