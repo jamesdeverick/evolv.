@@ -3,6 +3,10 @@
 # --------------------------------------------
 
 import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # ========== API Configuration ==========
 # Default to "ollama" for Railway/Docker deployments, or override with LLM_PROVIDER env var

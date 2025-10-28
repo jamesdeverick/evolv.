@@ -74,6 +74,19 @@ def probe_scrapingdog_status(api_key: str) -> Dict[str, Any]:
     Returns:
         Dict with status information
     """
+    # Validate API key format
+    if not api_key or api_key.strip() == "" or api_key == "your_scrapingdog_api_key_here":
+        return {
+            "ok": False,
+            "http_status": 0,
+            "message": "Invalid or missing API key",
+            "related_count": 0,
+            "paa_count": 0,
+            "organic_count": 0,
+            "has_json": False,
+            "body_sample": "API key is not set or is still the placeholder value. Please get a valid API key from https://www.scrapingdog.com/",
+        }
+
     url = "https://api.scrapingdog.com/google"
     params = {"api_key": api_key, "query": "test"}
     status, body, data = sd_request(url, params, timeout=20)
@@ -88,6 +101,14 @@ def probe_scrapingdog_status(api_key: str) -> Dict[str, Any]:
         "has_json": bool(data),
         "body_sample": (body or "")[:300],
     }
+
+    # Check for authentication errors
+    if status == 401:
+        result.update({
+            "message": "Authentication failed - Invalid API key",
+            "body_sample": f"HTTP 401 Unauthorized. Please check your API key. Response: {(body or '')[:200]}\n\nGet your API key from: https://app.scrapingdog.com/dashboard"
+        })
+        return result
 
     if data:
         # Parse response fields (handle multiple naming conventions)
@@ -149,6 +170,15 @@ class ScrapingdogClient:
             "hl": "en"
         }
         status, body, data = sd_request(_self.base_url, params)
+
+        # Check for authentication errors
+        if status == 401:
+            st.error("❌ Scrapingdog API Authentication Failed!")
+            st.error("Your API key is invalid or has expired.")
+            st.info("📝 To fix this:\n1. Sign up or log in at https://www.scrapingdog.com/\n2. Go to your dashboard: https://app.scrapingdog.com/dashboard\n3. Copy your API key\n4. Update your .env file with: SCRAPINGDOG_API_KEY=your_actual_key\n5. Or enter it in the app when prompted")
+            with st.expander("API Response Details"):
+                st.code(body[:500])
+            return [], [], []
 
         if data:
             # Parse related searches
@@ -222,6 +252,13 @@ class ScrapingdogClient:
         }
         status, body, data = sd_request(_self.base_url, params)
         debug = []
+
+        # Check for authentication errors
+        if status == 401:
+            st.error("❌ Scrapingdog API Authentication Failed!")
+            st.error("Your API key is invalid or has expired.")
+            st.info("📝 To fix this:\n1. Sign up or log in at https://www.scrapingdog.com/\n2. Go to your dashboard: https://app.scrapingdog.com/dashboard\n3. Copy your API key\n4. Update your .env file with: SCRAPINGDOG_API_KEY=your_actual_key\n5. Or enter it in the app when prompted")
+            return [], {}, ["HTTP 401: Authentication failed"]
 
         if data:
             serp = []
