@@ -46,12 +46,20 @@ image = (
         "defusedxml>=0.7.1",
         "plotly>=5.14.0",
     )
-    .copy_local_dir("./api", "/app/api")
-    .copy_local_dir("./utils", "/app/utils")
-    .copy_local_dir("./analysis", "/app/analysis")
-    .copy_local_file("./app.py", "/app/app.py")
-    .copy_local_file("./config.py", "/app/config.py")
-    .copy_local_file("./.streamlit/config.toml", "/app/.streamlit/config.toml")
+)
+
+# Create mount for your application code
+# This automatically syncs your local files to Modal
+code_mount = modal.Mount.from_local_dir(
+    ".",  # Current directory
+    remote_path="/app",
+    condition=lambda path: not any(
+        excluded in path for excluded in [
+            ".git", "__pycache__", ".venv", "venv",
+            ".env", ".DS_Store", "*.pyc", "*.md",
+            ".dockerignore", "Dockerfile", "railway.toml"
+        ]
+    )
 )
 
 
@@ -59,6 +67,7 @@ image = (
     image=image,
     gpu="A10G",  # NVIDIA A10G with 24GB VRAM, ~$1.10/hour
     volumes={"/root/.ollama": volume},
+    mounts=[code_mount],  # Mount your code
     timeout=3600,  # Max 1 hour per session
     container_idle_timeout=600,  # Stay warm 10 min after last request
     secrets=[modal.Secret.from_name("scrapingdog-api")],  # Add your API key in Modal dashboard
@@ -72,6 +81,9 @@ def web():
     import subprocess
     import time
     import requests
+
+    # Change to app directory
+    os.chdir("/app")
 
     # Start Ollama in background
     print("🚀 Starting Ollama server...")
@@ -115,7 +127,7 @@ def web():
     print("🌟 Starting Streamlit...")
     subprocess.call([
         "streamlit", "run",
-        "/app/app.py",
+        "app.py",  # Now relative path since we're in /app
         "--server.port=8501",
         "--server.address=0.0.0.0",
         "--server.headless=true",
