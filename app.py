@@ -187,6 +187,7 @@ def init_state():
         "competitor_analysis": None,
         "keyword_clusters": {},
         "generated_brief_content": "",
+        "drafted_content": "",
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -634,10 +635,164 @@ def show_step4():
         )
 
     # Navigation
-    c1, c2 = st.columns(2)
+    c1, c2, c3 = st.columns(3)
     with c1:
         if st.button("Back to Audit Analysis (Step 3)"):
             st.session_state.current_step = 3
+            st.rerun()
+    with c2:
+        if st.session_state.generated_brief_content and not st.session_state.generated_brief_content.startswith("Error"):
+            if st.button("✨ Draft Content with Claude (Step 5)", type="primary"):
+                st.session_state.current_step = 5
+                st.rerun()
+    with c3:
+        if st.button("Reset All and Start Over"):
+            for key in list(st.session_state.keys()):
+                del st.session_state[key]
+            init_state()
+            st.rerun()
+
+def show_step5():
+    """Step 5: Draft content using Claude API."""
+    st.header("Step 5: Draft Content with Claude")
+
+    # Check if we have a brief to work with
+    if not st.session_state.generated_brief_content or st.session_state.generated_brief_content.startswith("Error"):
+        st.error("No content brief available. Please complete Step 4 first.")
+        if st.button("Back to Step 4"):
+            st.session_state.current_step = 4
+            st.rerun()
+        return
+
+    st.info(
+        f"Using Claude to draft full content based on your brief for "
+        f"'{st.session_state.selected_brief_keyword}'"
+    )
+
+    # Display brief summary
+    with st.expander("📋 Content Brief (Click to expand)", expanded=False):
+        st.markdown(st.session_state.generated_brief_content)
+
+    # Claude configuration
+    st.subheader("Claude Configuration")
+
+    # Get or create Claude client
+    claude_available = bool(ANTHROPIC_API_KEY)
+
+    if claude_available:
+        st.success(f"✓ Claude API configured: {ANTHROPIC_MODEL}")
+    else:
+        st.warning("⚠ Claude API key not found in environment")
+        api_key_input = st.text_input(
+            "Enter your Anthropic API Key:",
+            type="password",
+            help="Get your API key from https://console.anthropic.com/"
+        )
+        if api_key_input:
+            # Temporarily set the API key
+            import os
+            os.environ["ANTHROPIC_API_KEY"] = api_key_input
+            from config import ANTHROPIC_API_KEY as temp_key
+            claude_available = bool(api_key_input)
+        else:
+            st.stop()
+
+    # Content length selection
+    word_count = st.slider(
+        "Target word count:",
+        min_value=500,
+        max_value=3000,
+        value=1500,
+        step=100,
+        help="Approximate number of words for the drafted content"
+    )
+
+    # Additional instructions
+    additional_instructions = st.text_area(
+        "Additional instructions for Claude (optional):",
+        height=100,
+        placeholder="e.g., Include specific examples, focus on practical tips, add statistics, etc."
+    )
+
+    # Generate button
+    if st.button("🚀 Generate Content Draft", type="primary"):
+        with st.spinner(f"Claude is drafting your content (~{word_count} words)..."):
+            # Create the prompt for Claude
+            prompt = f"""You are an expert SEO content writer. Based on the following content brief, write a complete, publication-ready article.
+
+CONTENT BRIEF:
+{st.session_state.generated_brief_content}
+
+TARGET WORD COUNT: ~{word_count} words
+
+{"ADDITIONAL INSTRUCTIONS:\n" + additional_instructions if additional_instructions else ""}
+
+Please write a complete, engaging article that:
+1. Follows the structure outlined in the brief
+2. Incorporates all target keywords naturally
+3. Addresses the user intent and SERP insights
+4. Maintains the specified tone of voice
+5. Is well-formatted with proper headings (## and ###)
+6. Includes engaging introduction and conclusion
+7. Uses clear, scannable paragraphs
+
+Write the article in Markdown format. Begin now:"""
+
+            # Use Anthropic client for drafting
+            claude_client = get_llm_client(provider="anthropic")
+
+            if not claude_client.available:
+                st.error(f"Claude API not available: {claude_client.get_status().get('error', 'Unknown error')}")
+            else:
+                # Generate the content
+                st.session_state.drafted_content = claude_client.complete(
+                    prompt=prompt,
+                    temperature=0.7,
+                    max_tokens=word_count * 2  # Rough token estimate
+                )
+
+                if st.session_state.drafted_content and not st.session_state.drafted_content.startswith("Error"):
+                    st.success("✅ Content draft generated successfully!")
+                else:
+                    st.error("Failed to generate content draft.")
+
+    # Display and edit drafted content
+    if st.session_state.drafted_content and not st.session_state.drafted_content.startswith("Error"):
+        st.markdown("---")
+        st.subheader("📝 Generated Content Draft")
+
+        # Show preview
+        with st.expander("Preview (rendered)", expanded=True):
+            st.markdown(st.session_state.drafted_content)
+
+        # Edit area
+        st.markdown("#### Edit the content before exporting")
+        edited_content = st.text_area(
+            "Edit Content",
+            value=st.session_state.drafted_content,
+            height=600,
+            key="content_editor"
+        )
+        st.session_state.drafted_content = edited_content
+
+        # Word count
+        word_count_actual = len(edited_content.split())
+        st.caption(f"📊 Word count: {word_count_actual} words")
+
+        # Download button
+        st.download_button(
+            "⬇ Download Content (Markdown)",
+            data=edited_content.encode("utf-8"),
+            file_name=f"content_{st.session_state.selected_brief_keyword.replace(' ', '_')}_{datetime.now().strftime('%Y%m%d_%H%M')}.md",
+            mime="text/markdown"
+        )
+
+    # Navigation
+    st.markdown("---")
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button("← Back to Content Brief (Step 4)"):
+            st.session_state.current_step = 4
             st.rerun()
     with c2:
         if st.button("Reset All and Start Over"):
@@ -656,6 +811,8 @@ elif st.session_state.current_step == 3:
     show_step3()
 elif st.session_state.current_step == 4:
     show_step4()
+elif st.session_state.current_step == 5:
+    show_step5()
 
 # Footer
 st.markdown("---")

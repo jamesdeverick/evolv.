@@ -16,6 +16,8 @@ from config import (
     DEEPSEEK_MODEL,
     OPENAI_API_KEY,
     OPENAI_MODEL,
+    ANTHROPIC_API_KEY,
+    ANTHROPIC_MODEL,
     LLM_TIMEOUT
 )
 
@@ -31,7 +33,7 @@ class LLMClient:
         Initialize LLM client.
 
         Args:
-            provider: "ollama", "deepseek", or "openai". If None, uses DEFAULT_LLM_PROVIDER
+            provider: "ollama", "deepseek", "openai", or "anthropic". If None, uses DEFAULT_LLM_PROVIDER
         """
         self.provider = provider or DEFAULT_LLM_PROVIDER
         self.available = False
@@ -48,6 +50,8 @@ class LLMClient:
             self._configure_deepseek()
         elif self.provider == "openai":
             self._configure_openai()
+        elif self.provider == "anthropic":
+            self._configure_anthropic()
         else:
             raise ValueError(f"Unknown LLM provider: {self.provider}")
 
@@ -91,6 +95,17 @@ class LLMClient:
 
         self.model = OPENAI_MODEL
         self.api_base = "https://api.openai.com/v1"
+        self.available = True
+
+    def _configure_anthropic(self):
+        """Configure Anthropic/Claude (cloud deployment)."""
+        if not ANTHROPIC_API_KEY:
+            self.available = False
+            self.error = "ANTHROPIC_API_KEY not configured"
+            return
+
+        self.model = ANTHROPIC_MODEL
+        self.api_base = "https://api.anthropic.com"
         self.available = True
 
     def get_status(self) -> Dict[str, Any]:
@@ -177,6 +192,9 @@ class LLMClient:
                 model_name = f"deepseek/{self.model}"
             elif self.provider == "openai":
                 litellm.api_key = OPENAI_API_KEY
+                model_name = self.model
+            elif self.provider == "anthropic":
+                litellm.api_key = ANTHROPIC_API_KEY
                 model_name = self.model
             else:
                 model_name = self.model
