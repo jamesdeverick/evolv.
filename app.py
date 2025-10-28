@@ -158,9 +158,13 @@ init_state()
 
 
 # ========== Initialize API Clients ==========
-scrapingdog = ScrapingdogClient(scrapingdog_api_key)
-keyword_analyzer = KeywordAnalyzer(scrapingdog)
-competitive_analyzer = CompetitiveAnalyzer(scrapingdog)
+# Note: Clients are re-instantiated with the current API key each time they're used
+# to ensure any UI-entered key is picked up
+def get_scrapingdog_client():
+    """Get Scrapingdog client with current API key."""
+    return ScrapingdogClient(scrapingdog_api_key)
+
+# Initialize non-API-dependent clients
 brief_creator = ContentBriefCreator()
 clusterer = KeywordClusterer()
 
@@ -235,6 +239,8 @@ def show_step1():
             return
 
         with st.spinner("Performing initial keyword research and SERP analysis..."):
+            scrapingdog = get_scrapingdog_client()
+            keyword_analyzer = KeywordAnalyzer(scrapingdog)
             related, paa, organics = scrapingdog.get_keywords(st.session_state.query_topic)
             df, selected_kw, serp_insights = keyword_analyzer.analyze_and_identify_keywords(
                 st.session_state.query_topic,
@@ -329,6 +335,8 @@ def show_step2():
                 st.warning("Select a main keyword first (checkbox) to analyze competitors.")
             else:
                 with st.spinner("Analyzing competitors..."):
+                    scrapingdog = get_scrapingdog_client()
+                    competitive_analyzer = CompetitiveAnalyzer(scrapingdog)
                     st.session_state.competitor_analysis = competitive_analyzer.analyze_competitors(
                         st.session_state.selected_brief_keyword,
                         num_competitors=int(num_comp)
