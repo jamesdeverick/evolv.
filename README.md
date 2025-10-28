@@ -52,9 +52,40 @@ A powerful SEO content planning tool that combines LLM analysis with real-time k
    streamlit run app.py
    ```
 
-### Cloud Deployment with Ollama (Railway) - **RECOMMENDED** 🚂
+## Cloud Deployment Options
 
-Deploy with Ollama + Mistral to Railway for full control and better performance.
+### Option 1: Modal.com with GPU - **RECOMMENDED** ⚡
+
+**Best for**: Production use with Ollama + Mistral on GPU (CUDA support)
+
+Deploy with serverless GPU - **pay only when running!**
+
+**Perfect for low usage**: 10 min/day = **~$5.50/month**
+
+**See detailed guide**: [MODAL_DEPLOYMENT.md](MODAL_DEPLOYMENT.md)
+
+**Quick setup**:
+```bash
+pip install modal
+modal token new
+modal secret create scrapingdog-api SCRAPINGDOG_API_KEY=your_key
+modal deploy modal_deploy.py
+```
+
+**Why Modal:**
+- ✅ **Full GPU/CUDA support** (NVIDIA A10G)
+- ✅ **Fast responses** (0.5-1s vs 5-15s on CPU)
+- ✅ **Pay-per-second** billing (not 24/7)
+- ✅ **Auto-scaling** and auto-shutdown
+- ✅ **$30 free credit** to start
+
+**Cost**: ~$1.10/hour GPU, perfect for sporadic use
+
+---
+
+### Option 2: Railway with Ollama (CPU Only)
+
+Deploy with Ollama + Mistral to Railway - **CPU only, no GPU support**
 
 **See detailed guide**: [RAILWAY_DEPLOYMENT.md](RAILWAY_DEPLOYMENT.md)
 
