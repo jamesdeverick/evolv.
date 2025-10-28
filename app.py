@@ -40,11 +40,16 @@ st.markdown("Combines LLM audit analysis with real-time keyword research, SERP i
 
 
 # ========== Get API Keys ==========
-scrapingdog_api_key = SCRAPINGDOG_API_KEY
-try:
-    scrapingdog_api_key = scrapingdog_api_key or st.secrets.get("scrapingdog_api_key")
-except Exception:
-    pass
+# Initialize API key in session state to persist across reruns
+if "scrapingdog_api_key" not in st.session_state:
+    st.session_state.scrapingdog_api_key = SCRAPINGDOG_API_KEY
+    try:
+        st.session_state.scrapingdog_api_key = st.session_state.scrapingdog_api_key or st.secrets.get("scrapingdog_api_key")
+    except Exception:
+        pass
+
+# Use session state value
+scrapingdog_api_key = st.session_state.scrapingdog_api_key
 
 
 # ========== Sidebar: LLM & Settings ==========
@@ -106,16 +111,22 @@ with st.sidebar.expander("Preview Tone of Voice text", expanded=False):
 # ========== Scrapingdog Status ==========
 if not scrapingdog_api_key:
     st.error("Scrapingdog API key not found. Enter it below or set SCRAPINGDOG_API_KEY.")
-    scrapingdog_api_key = st.text_input("Enter Scrapingdog API Key:", type="password")
-    if not scrapingdog_api_key:
+    entered_key = st.text_input("Enter Scrapingdog API Key:", type="password", key="scrapingdog_key_input")
+    if entered_key:
+        st.session_state.scrapingdog_api_key = entered_key
+        scrapingdog_api_key = entered_key
+        st.rerun()  # Rerun to use the new key
+    else:
         st.stop()
 
 st.sidebar.header("Scrapingdog Status")
 refresh = st.sidebar.button("Refresh Scrapingdog Check", use_container_width=True)
 if refresh:
     probe_scrapingdog_status.clear()
+    st.rerun()  # Force rerun after clearing cache
 
-status_info = probe_scrapingdog_status(scrapingdog_api_key)
+# Always use the session state key
+status_info = probe_scrapingdog_status(st.session_state.scrapingdog_api_key)
 
 if status_info["ok"]:
     if status_info["http_status"] == 200:
@@ -161,8 +172,8 @@ init_state()
 # Note: Clients are re-instantiated with the current API key each time they're used
 # to ensure any UI-entered key is picked up
 def get_scrapingdog_client():
-    """Get Scrapingdog client with current API key."""
-    return ScrapingdogClient(scrapingdog_api_key)
+    """Get Scrapingdog client with current API key from session state."""
+    return ScrapingdogClient(st.session_state.scrapingdog_api_key)
 
 # Initialize non-API-dependent clients
 brief_creator = ContentBriefCreator()
