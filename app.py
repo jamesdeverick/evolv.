@@ -720,14 +720,14 @@ def show_step5():
     if st.button("🚀 Generate Content Draft", type="primary"):
         with st.spinner(f"Claude is drafting your content (~{word_count} words)..."):
             # Create the prompt for Claude
+            additional_instr = f"\n\nADDITIONAL INSTRUCTIONS:\n{additional_instructions}" if additional_instructions else ""
+
             prompt = f"""You are an expert SEO content writer. Based on the following content brief, write a complete, publication-ready article.
 
 CONTENT BRIEF:
 {st.session_state.generated_brief_content}
 
-TARGET WORD COUNT: ~{word_count} words
-
-{"ADDITIONAL INSTRUCTIONS:\n" + additional_instructions if additional_instructions else ""}
+TARGET WORD COUNT: ~{word_count} words{additional_instr}
 
 Please write a complete, engaging article that:
 1. Follows the structure outlined in the brief
