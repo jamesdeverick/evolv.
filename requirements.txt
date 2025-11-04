@@ -18,6 +18,9 @@ defusedxml>=0.7.1
 # Visualization (optional but recommended)
 plotly>=5.14.0
 
+# Note: blinker is a dependency of streamlit but may conflict with system version
+# If install fails with blinker error, use: pip install -r requirements.txt --ignore-installed blinker
+
 # Note: For cloud deployment (HuggingFace Spaces):
 # - Set environment variable LLM_PROVIDER=deepseek
 # - Configure DEEPSEEK_API_KEY in Secrets
