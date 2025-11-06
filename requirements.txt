@@ -18,6 +18,14 @@ defusedxml>=0.7.1
 # Visualization (optional but recommended)
 plotly>=5.14.0
 
+# NLP & Semantic Analysis for Generative Search Optimization
+spacy>=3.7.0
+sentence-transformers>=2.2.0
+scikit-learn>=1.3.0
+
+# Note: After installing requirements, download spaCy model with:
+# python -m spacy download en_core_web_sm
+
 # Note: blinker is a dependency of streamlit but may conflict with system version
 # If install fails with blinker error, use: pip install -r requirements.txt --ignore-installed blinker
 

@@ -5,13 +5,34 @@
 from typing import Optional, List, Dict, Any
 from api.llm_client import get_llm_client
 
+# Try to import NLP tools for generative search optimization
+try:
+    from analysis.entity_extractor import EntityExtractor
+    from analysis.semantic_analyzer import SemanticAnalyzer
+    NLP_AVAILABLE = True
+except ImportError:
+    NLP_AVAILABLE = False
+
 
 class ContentBriefCreator:
-    """Create comprehensive SEO content briefs."""
+    """Create comprehensive SEO content briefs with generative search optimization."""
 
     def __init__(self):
-        """Initialize content brief creator."""
+        """Initialize content brief creator with NLP capabilities."""
         self.llm = get_llm_client()
+
+        # Initialize NLP tools if available
+        if NLP_AVAILABLE:
+            self.entity_extractor = EntityExtractor()
+            self.semantic_analyzer = SemanticAnalyzer()
+            self.nlp_available = (
+                self.entity_extractor.available and
+                self.semantic_analyzer.available
+            )
+        else:
+            self.entity_extractor = None
+            self.semantic_analyzer = None
+            self.nlp_available = False
 
     def create_brief(
         self,
@@ -24,7 +45,8 @@ class ContentBriefCreator:
         llm_analysis: str = "",
         serp_insights: Optional[Dict[str, Any]] = None,
         tone_style: str = "Informative and friendly",
-        tone_guidelines: str = ""
+        tone_guidelines: str = "",
+        competitor_analysis: Optional[Dict[str, Any]] = None
     ) -> str:
         """
         Create a comprehensive content brief.
@@ -69,6 +91,11 @@ class ContentBriefCreator:
             serp_block += f"\n* **Gaps to Exploit in Competitors' Content:** {serp_insights.get('gaps_to_exploit', 'N/A')}"
             serp_block += f"\n* **Unique Angles to Pursue:** {serp_insights.get('unique_angles', 'N/A')}"
 
+        # Build entity guidance for generative search optimization
+        entity_guidance = ""
+        if competitor_analysis and self.nlp_available:
+            entity_guidance = self._build_entity_guidance(competitor_analysis)
+
         # Build tone header with strict guidelines
         strict_tov = (tone_guidelines or "").strip()
         tone_header = f"**Tone & Style (MANDATORY):** {tone_style}"
@@ -102,6 +129,17 @@ class ContentBriefCreator:
             "**Key SERP Insights:**",
             serp_block or "[Not available]",
             "",
+        ]
+
+        # Add entity guidance if available
+        if entity_guidance:
+            prompt_lines.extend([
+                "**🤖 Generative AI Optimization Guidance:**",
+                entity_guidance,
+                ""
+            ])
+
+        prompt_lines.extend([
             "**Return the entire brief in Markdown.**",
             "",
             "**1. Content Title (SEO Optimized)**",
@@ -159,3 +197,58 @@ class ContentBriefCreator:
             return "No valid response from LLM for content brief creation."
 
         return clean
+
+    def _build_entity_guidance(self, competitor_analysis: Dict[str, Any]) -> str:
+        """
+        Build entity guidance section for generative search optimization.
+
+        Args:
+            competitor_analysis: Competitor analysis data with entity information
+
+        Returns:
+            Markdown formatted guidance string
+        """
+        guidance_lines = []
+
+        # Get entity data
+        entity_stats = competitor_analysis.get("entity_analysis", {})
+        common_entities = competitor_analysis.get("common_entities", {})
+
+        if entity_stats:
+            guidance_lines.append("\n**Entity Coverage Benchmarks (AI Citation Signals):**")
+            guidance_lines.append(
+                f"- Top competitors mention an average of **{entity_stats.get('avg_orgs_mentioned', 0)} organizations/companies**"
+            )
+            guidance_lines.append(
+                f"- Top competitors cite an average of **{entity_stats.get('avg_people_mentioned', 0)} people/experts**"
+            )
+            guidance_lines.append(
+                "- IMPORTANT: AI models (ChatGPT, Perplexity, Claude) prioritize content that mentions authoritative entities"
+            )
+
+        if common_entities:
+            guidance_lines.append("\n**Critical Entities to Mention (appear in multiple competitor articles):**")
+
+            # Organizations
+            if "ORG" in common_entities:
+                org_list = [f"{ent} ({count}x)" for ent, count in common_entities["ORG"][:5]]
+                if org_list:
+                    guidance_lines.append(f"- **Organizations:** {', '.join(org_list)}")
+
+            # People/Experts
+            if "PERSON" in common_entities:
+                person_list = [f"{ent} ({count}x)" for ent, count in common_entities["PERSON"][:5]]
+                if person_list:
+                    guidance_lines.append(f"- **Experts/Authors:** {', '.join(person_list)}")
+
+            # Products/Technologies
+            if "PRODUCT" in common_entities:
+                product_list = [f"{ent} ({count}x)" for ent, count in common_entities["PRODUCT"][:5]]
+                if product_list:
+                    guidance_lines.append(f"- **Products/Technologies:** {', '.join(product_list)}")
+
+            guidance_lines.append(
+                "\n_Ensure the content outline includes sections that naturally incorporate these entities with proper context._"
+            )
+
+        return "\n".join(guidance_lines) if guidance_lines else ""

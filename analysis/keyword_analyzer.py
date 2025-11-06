@@ -294,15 +294,28 @@ Return ONLY JSON:
 
 
 class KeywordClusterer:
-    """Cluster keywords semantically using LLM."""
+    """Cluster keywords semantically using embeddings (faster & more reliable than LLM)."""
 
     def __init__(self):
-        """Initialize clusterer."""
-        self.llm = get_llm_client()
+        """Initialize clusterer with semantic analyzer."""
+        try:
+            from analysis.semantic_analyzer import SemanticAnalyzer
+            self.semantic_analyzer = SemanticAnalyzer()
+            self.available = self.semantic_analyzer.available
+        except ImportError:
+            self.semantic_analyzer = None
+            self.available = False
+
+        # Fallback to LLM if semantic analyzer not available
+        if not self.available:
+            self.llm = get_llm_client()
+            self.use_llm_fallback = self.llm.available
+        else:
+            self.use_llm_fallback = False
 
     def create_clusters(self, keywords_df: pd.DataFrame) -> Dict[str, List[str]]:
         """
-        Create semantic clusters from keywords.
+        Create semantic clusters from keywords using embeddings.
 
         Args:
             keywords_df: DataFrame with keywords
@@ -310,10 +323,6 @@ class KeywordClusterer:
         Returns:
             Dict mapping cluster names to keyword lists
         """
-        if not self.llm.available:
-            st.warning("LLM disabled; cannot cluster.")
-            return {}
-
         if keywords_df is None or keywords_df.empty or "Keyword" not in keywords_df.columns:
             st.warning("No keywords to cluster.")
             return {}
@@ -328,6 +337,55 @@ class KeywordClusterer:
             st.warning("No valid keywords for clustering.")
             return {}
 
+        # Try semantic clustering first (fast, reliable)
+        if self.available:
+            try:
+                st.info("⚡ Using fast semantic clustering (embeddings)...")
+                clusters = self.semantic_analyzer.cluster_keywords_semantically(
+                    top_keywords,
+                    distance_threshold=0.6  # 0.3-0.7 range, higher = fewer clusters
+                )
+
+                # Calculate and show quality metrics
+                quality = self.semantic_analyzer.get_cluster_quality_score(top_keywords, clusters)
+                if quality.get("available"):
+                    st.success(
+                        f"✓ Created {quality['num_clusters']} clusters "
+                        f"(cohesion: {quality['overall_cohesion']:.2f}, "
+                        f"avg size: {quality['avg_cluster_size']:.1f})"
+                    )
+
+                return clusters
+
+            except Exception as e:
+                st.warning(f"Semantic clustering failed: {e}. Trying LLM fallback...")
+                # Fall through to LLM fallback
+
+        # LLM fallback (slower, less reliable, but works without dependencies)
+        if self.use_llm_fallback:
+            st.info("Using LLM-based clustering (slower)...")
+            return self._cluster_with_llm(top_keywords)
+
+        # Final fallback: simple grouping
+        st.warning("No clustering method available. Creating simple groups...")
+        clusters = {}
+        for i, kw in enumerate(top_keywords):
+            cluster_name = f"Group {(i // 5) + 1}"
+            if cluster_name not in clusters:
+                clusters[cluster_name] = []
+            clusters[cluster_name].append(kw)
+        return clusters
+
+    def _cluster_with_llm(self, top_keywords: List[str]) -> Dict[str, List[str]]:
+        """
+        Fallback LLM-based clustering (original method).
+
+        Args:
+            top_keywords: Keywords to cluster
+
+        Returns:
+            Dict mapping cluster names to keyword lists
+        """
         prompt = (
             "Group these keywords into semantic clusters based on topic/user intent.\n\n"
             f"Keywords: {', '.join(top_keywords)}\n\n"
@@ -357,29 +415,21 @@ class KeywordClusterer:
 
             # Try to repair common JSON issues
             s = s.strip()
-            # Remove trailing commas before closing braces/brackets
             s = re.sub(r',(\s*[}\]])', r'\1', s)
-            # Fix single quotes to double quotes (but preserve apostrophes in words)
             s = re.sub(r"(?<!\w)'([^']*)'(?=\s*[,:\]\}])", r'"\1"', s)
 
             try:
                 clusters = json.loads(s)
             except json.JSONDecodeError as json_err:
-                # Show the problematic JSON for debugging
-                st.warning(f"LLM returned invalid JSON. Attempting fallback clustering...")
-                with st.expander("Debug: Invalid JSON from LLM"):
-                    st.code(s)
-                    st.error(f"JSON Error: {json_err}")
-
-                # Fallback: create simple clusters based on first word
+                st.warning(f"LLM returned invalid JSON. Creating fallback clusters...")
+                # Fallback: create simple clusters
                 clusters = {}
                 for i, kw in enumerate(top_keywords):
                     cluster_name = f"Cluster {(i // 5) + 1}"
                     if cluster_name not in clusters:
                         clusters[cluster_name] = []
                     clusters[cluster_name].append(kw)
-
-                st.info(f"Created {len(clusters)} fallback clusters with ~5 keywords each.")
+                st.info(f"Created {len(clusters)} fallback clusters.")
 
             # Clean and deduplicate
             seen = set()

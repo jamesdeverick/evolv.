@@ -391,6 +391,31 @@ def show_step2():
                 st.markdown("**Common headings across competitors:**")
                 for h in comp["common_headings"]:
                     st.write(f"- {h}")
+
+            # Display entity analysis for generative search optimization
+            if comp.get("entity_analysis"):
+                st.markdown("---")
+                st.markdown("**🤖 Entity Analysis (Generative Search Optimization)**")
+                entity_stats = comp["entity_analysis"]
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Avg Organizations", entity_stats.get("avg_orgs_mentioned", 0))
+                with col2:
+                    st.metric("Avg People/Experts", entity_stats.get("avg_people_mentioned", 0))
+                with col3:
+                    st.metric("Unique Orgs", entity_stats.get("total_unique_orgs", 0))
+
+            # Display common entities mentioned by multiple competitors
+            if comp.get("common_entities"):
+                with st.expander("📊 Common Entities Across Competitors (AI Citation Signals)"):
+                    st.markdown("_These entities appear in multiple competitor articles - AI models expect to see these mentioned:_")
+                    common_ents = comp["common_entities"]
+                    for ent_type, entities in common_ents.items():
+                        if entities:
+                            st.markdown(f"**{ent_type}:**")
+                            for entity, count in entities[:10]:  # Top 10
+                                st.write(f"- {entity} (mentioned in {count} sources)")
+
             if comp.get("competitors"):
                 comp_df = pd.DataFrame([
                     {
@@ -611,6 +636,7 @@ def show_step4():
                     serp_insights=st.session_state.serp_insights,
                     tone_style=st.session_state.brief_tone,
                     tone_guidelines=strict_tov_text,
+                    competitor_analysis=st.session_state.competitor_analysis,
                 )
 
             if st.session_state.generated_brief_content and not st.session_state.generated_brief_content.startswith("Error"):
