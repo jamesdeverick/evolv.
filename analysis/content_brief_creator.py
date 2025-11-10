@@ -190,13 +190,93 @@ class ContentBriefCreator:
         if not result or result.startswith("Error"):
             return result or "No valid response from LLM for content brief creation."
 
-        # Clean up formatting
-        clean = "\n".join([ln.rstrip() for ln in result.splitlines()])
+        # Clean up formatting and enforce markdown headings
+        clean = self._enforce_markdown_headings(result)
 
         if not clean.strip():
             return "No valid response from LLM for content brief creation."
 
         return clean
+
+    def _enforce_markdown_headings(self, text: str) -> str:
+        """
+        Post-process the brief to ensure headings use proper markdown syntax.
+
+        Args:
+            text: Raw brief text from LLM
+
+        Returns:
+            Text with enforced markdown heading syntax
+        """
+        import re
+
+        lines = text.splitlines()
+        processed_lines = []
+
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+
+            # Skip if already has markdown heading
+            if stripped.startswith('#'):
+                processed_lines.append(line)
+                continue
+
+            # Skip empty lines
+            if not stripped:
+                processed_lines.append(line)
+                continue
+
+            # Check if this looks like a heading (various patterns)
+            # Pattern 1: Lines that are title case and relatively short
+            if (len(stripped) < 80 and
+                not stripped.endswith('.') and
+                not stripped.endswith(',') and
+                not stripped.startswith('*') and
+                not stripped.startswith('-') and
+                stripped[0].isupper()):
+
+                # Check if next line is description/key points
+                next_line = lines[i+1].strip() if i+1 < len(lines) else ""
+
+                # If followed by Description: or Key Points:, it's likely a heading
+                if (next_line.startswith('Description:') or
+                    next_line.startswith('*Description:') or
+                    next_line.startswith('Key Points:') or
+                    next_line.startswith('*Key Points:')):
+
+                    # Determine if H2 or H3 based on context
+                    # If it's indented or has specific keywords, make it H3
+                    if (line.startswith('    ') or
+                        line.startswith('\t') or
+                        any(keyword in stripped.lower() for keyword in ['overview', 'installation', 'usage', 'case study', 'tips', 'best practices'])):
+                        processed_lines.append(f"### {stripped}")
+                    else:
+                        processed_lines.append(f"## {stripped}")
+                    continue
+
+            # Pattern 2: Section titles in outline (numbered or not)
+            # Remove leading numbers/bullets
+            cleaned = re.sub(r'^\[?\w+\s*\d*\]?\s*', '', stripped)
+            if (cleaned and
+                len(cleaned) < 80 and
+                not cleaned.endswith('.') and
+                cleaned[0].isupper()):
+
+                next_line = lines[i+1].strip() if i+1 < len(lines) else ""
+                if (next_line.startswith('Description:') or
+                    next_line.startswith('*Description:')):
+
+                    # Check indentation for H2 vs H3
+                    if line.startswith('    ') or line.startswith('\t'):
+                        processed_lines.append(f"### {cleaned}")
+                    else:
+                        processed_lines.append(f"## {cleaned}")
+                    continue
+
+            # Default: keep line as-is
+            processed_lines.append(line)
+
+        return "\n".join([ln.rstrip() for ln in processed_lines])
 
     def _build_entity_guidance(self, competitor_analysis: Dict[str, Any]) -> str:
         """
