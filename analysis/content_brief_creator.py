@@ -176,7 +176,7 @@ class ContentBriefCreator:
             "**8. Schema Suggestions**",
             "**9. Competitive Differentiators**",
             supporting_keywords_md,
-        ]
+        ])
 
         prompt = "\n".join(prompt_lines)
 
