@@ -200,7 +200,10 @@ class ContentBriefCreator:
 
     def _enforce_markdown_headings(self, text: str) -> str:
         """
-        Post-process the brief to ensure headings use proper markdown syntax.
+        Post-process the brief to ensure ALL headings use proper markdown syntax.
+
+        Simple rule: If a line is followed by "Description:" or "Key Points:",
+        it's a heading and MUST have ## or ### markdown syntax.
 
         Args:
             text: Raw brief text from LLM
@@ -208,73 +211,60 @@ class ContentBriefCreator:
         Returns:
             Text with enforced markdown heading syntax
         """
-        import re
-
         lines = text.splitlines()
         processed_lines = []
 
-        for i, line in enumerate(lines):
+        i = 0
+        while i < len(lines):
+            line = lines[i]
             stripped = line.strip()
 
             # Skip if already has markdown heading
             if stripped.startswith('#'):
                 processed_lines.append(line)
+                i += 1
                 continue
 
             # Skip empty lines
             if not stripped:
                 processed_lines.append(line)
+                i += 1
                 continue
 
-            # Check if this looks like a heading (various patterns)
-            # Pattern 1: Lines that are title case and relatively short
-            if (len(stripped) < 80 and
-                not stripped.endswith('.') and
-                not stripped.endswith(',') and
-                not stripped.startswith('*') and
-                not stripped.startswith('-') and
-                stripped[0].isupper()):
+            # Look ahead to find the next non-empty line
+            next_line = ""
+            next_line_idx = i + 1
+            while next_line_idx < len(lines):
+                next_candidate = lines[next_line_idx].strip()
+                if next_candidate:
+                    next_line = next_candidate
+                    break
+                next_line_idx += 1
 
-                # Check if next line is description/key points
-                next_line = lines[i+1].strip() if i+1 < len(lines) else ""
+            # Check if next line indicates this is a heading
+            is_heading = False
+            if next_line:
+                # Remove leading asterisks, stars, and spaces
+                next_cleaned = next_line.lstrip('* \t')
+                if (next_cleaned.startswith('Description:') or
+                    next_cleaned.startswith('Key Points:') or
+                    next_cleaned.startswith('Key points:')):
+                    is_heading = True
 
-                # If followed by Description: or Key Points:, it's likely a heading
-                if (next_line.startswith('Description:') or
-                    next_line.startswith('*Description:') or
-                    next_line.startswith('Key Points:') or
-                    next_line.startswith('*Key Points:')):
+            if is_heading:
+                # Determine H2 vs H3 based on indentation
+                # If line has leading whitespace, it's H3 (subsection)
+                # Otherwise it's H2 (main section)
+                if line.startswith('    ') or line.startswith('\t'):
+                    # Remove the indentation before adding markdown
+                    processed_lines.append(f"### {stripped}")
+                else:
+                    processed_lines.append(f"## {stripped}")
+            else:
+                # Not a heading, keep as-is
+                processed_lines.append(line)
 
-                    # Determine if H2 or H3 based on context
-                    # If it's indented or has specific keywords, make it H3
-                    if (line.startswith('    ') or
-                        line.startswith('\t') or
-                        any(keyword in stripped.lower() for keyword in ['overview', 'installation', 'usage', 'case study', 'tips', 'best practices'])):
-                        processed_lines.append(f"### {stripped}")
-                    else:
-                        processed_lines.append(f"## {stripped}")
-                    continue
-
-            # Pattern 2: Section titles in outline (numbered or not)
-            # Remove leading numbers/bullets
-            cleaned = re.sub(r'^\[?\w+\s*\d*\]?\s*', '', stripped)
-            if (cleaned and
-                len(cleaned) < 80 and
-                not cleaned.endswith('.') and
-                cleaned[0].isupper()):
-
-                next_line = lines[i+1].strip() if i+1 < len(lines) else ""
-                if (next_line.startswith('Description:') or
-                    next_line.startswith('*Description:')):
-
-                    # Check indentation for H2 vs H3
-                    if line.startswith('    ') or line.startswith('\t'):
-                        processed_lines.append(f"### {cleaned}")
-                    else:
-                        processed_lines.append(f"## {cleaned}")
-                    continue
-
-            # Default: keep line as-is
-            processed_lines.append(line)
+            i += 1
 
         return "\n".join([ln.rstrip() for ln in processed_lines])
 
