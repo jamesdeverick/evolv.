@@ -201,72 +201,52 @@ class ContentBriefCreator:
     def _enforce_markdown_headings(self, text: str) -> str:
         """
         Post-process the brief to ensure ALL headings use proper markdown syntax.
-
-        Simple rule: If a line is followed by "Description:" or "Key Points:",
-        it's a heading and MUST have ## or ### markdown syntax.
-
-        Args:
-            text: Raw brief text from LLM
-
-        Returns:
-            Text with enforced markdown heading syntax
+        Uses regex to find heading patterns and force ## or ### prefixes.
         """
-        lines = text.splitlines()
-        processed_lines = []
+        import re
 
-        i = 0
-        while i < len(lines):
-            line = lines[i]
-            stripped = line.strip()
+        # Pattern: Line followed by Description: or Key Points: (with optional * formatting)
+        # This regex captures: (heading_text)\n(optional whitespace)(*)?Description:
 
-            # Skip if already has markdown heading
-            if stripped.startswith('#'):
-                processed_lines.append(line)
-                i += 1
-                continue
+        # First pass: Add ## to main section headings (not indented)
+        # Match: start of line, non-whitespace text, newline, then Description: or Key Points:
+        text = re.sub(
+            r'^([A-Z][^\n]{0,100})\n(\s*)(\*)?Description:',
+            r'## \1\n\2\3Description:',
+            text,
+            flags=re.MULTILINE
+        )
 
-            # Skip empty lines
-            if not stripped:
-                processed_lines.append(line)
-                i += 1
-                continue
+        # Second pass: Add ## to lines followed by *Description:* pattern
+        text = re.sub(
+            r'^([A-Z][^\n]{0,100})\n(\s*)\*Description:\*',
+            r'## \1\n\2*Description:*',
+            text,
+            flags=re.MULTILINE
+        )
 
-            # Look ahead to find the next non-empty line
-            next_line = ""
-            next_line_idx = i + 1
-            while next_line_idx < len(lines):
-                next_candidate = lines[next_line_idx].strip()
-                if next_candidate:
-                    next_line = next_candidate
-                    break
-                next_line_idx += 1
+        # Third pass: Add ## to lines followed by Key Points:
+        text = re.sub(
+            r'^([A-Z][^\n]{0,100})\n(\s*)(\*)?Key [Pp]oints:',
+            r'## \1\n\2\3Key Points:',
+            text,
+            flags=re.MULTILINE
+        )
 
-            # Check if next line indicates this is a heading
-            is_heading = False
-            if next_line:
-                # Remove leading asterisks, stars, and spaces
-                next_cleaned = next_line.lstrip('* \t')
-                if (next_cleaned.startswith('Description:') or
-                    next_cleaned.startswith('Key Points:') or
-                    next_cleaned.startswith('Key points:')):
-                    is_heading = True
+        # Fourth pass: Handle indented headings as H3 (subsections)
+        # Match: whitespace + text + newline + Description:
+        text = re.sub(
+            r'^([ \t]+)([A-Z][^\n]{0,100})\n(\s*)(\*)?Description:',
+            r'### \2\n\3\4Description:',
+            text,
+            flags=re.MULTILINE
+        )
 
-            if is_heading:
-                # Determine H2 vs H3 based on indentation
-                # If line has leading whitespace, it's H3 (subsection)
-                # Otherwise it's H2 (main section)
-                if line.startswith('    ') or line.startswith('\t'):
-                    # Remove the indentation before adding markdown
-                    processed_lines.append(f"### {stripped}")
-                else:
-                    processed_lines.append(f"## {stripped}")
-            else:
-                # Not a heading, keep as-is
-                processed_lines.append(line)
+        # Fifth pass: Fix any duplicate ## that might have been added
+        text = re.sub(r'^##\s*##\s*', '## ', text, flags=re.MULTILINE)
+        text = re.sub(r'^###\s*###\s*', '### ', text, flags=re.MULTILINE)
 
-            i += 1
-
-        return "\n".join([ln.rstrip() for ln in processed_lines])
+        return text
 
     def _build_entity_guidance(self, competitor_analysis: Dict[str, Any]) -> str:
         """
