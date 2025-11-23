@@ -200,52 +200,55 @@ class ContentBriefCreator:
 
     def _enforce_markdown_headings(self, text: str) -> str:
         """
-        Post-process the brief to ensure ALL headings use proper markdown syntax.
-        Uses regex to find heading patterns and force ## or ### prefixes.
+        Aggressively enforce markdown heading syntax using multiple regex patterns.
         """
         import re
-
-        # Pattern: Line followed by Description: or Key Points: (with optional * formatting)
-        # This regex captures: (heading_text)\n(optional whitespace)(*)?Description:
-
-        # First pass: Add ## to main section headings (not indented)
-        # Match: start of line, non-whitespace text, newline, then Description: or Key Points:
+        
+        # Pattern 1: Any line followed by "Description:" (with any whitespace/formatting)
         text = re.sub(
-            r'^([A-Z][^\n]{0,100})\n(\s*)(\*)?Description:',
-            r'## \1\n\2\3Description:',
+            r'\n([A-Z][^\n#]{5,80})\s*\n\s*(?:\*\s*)?Description:',
+            r'\n## \1\nDescription:',
             text,
-            flags=re.MULTILINE
+            flags=re.IGNORECASE
         )
-
-        # Second pass: Add ## to lines followed by *Description:* pattern
+        
+        # Pattern 2: Any line followed by "Key Points:"
         text = re.sub(
-            r'^([A-Z][^\n]{0,100})\n(\s*)\*Description:\*',
-            r'## \1\n\2*Description:*',
+            r'\n([A-Z][^\n#]{5,80})\s*\n\s*(?:\*\s*)?Key Points:',
+            r'\n## \1\nKey Points:',
             text,
-            flags=re.MULTILINE
+            flags=re.IGNORECASE
         )
-
-        # Third pass: Add ## to lines followed by Key Points:
+        
+        # Pattern 3: Indented lines (subsections) followed by Description:
         text = re.sub(
-            r'^([A-Z][^\n]{0,100})\n(\s*)(\*)?Key [Pp]oints:',
-            r'## \1\n\2\3Key Points:',
+            r'\n\s{2,}([A-Z][^\n#]{5,80})\s*\n\s*(?:\*\s*)?Description:',
+            r'\n### \1\nDescription:',
             text,
-            flags=re.MULTILINE
+            flags=re.IGNORECASE
         )
-
-        # Fourth pass: Handle indented headings as H3 (subsections)
-        # Match: whitespace + text + newline + Description:
-        text = re.sub(
-            r'^([ \t]+)([A-Z][^\n]{0,100})\n(\s*)(\*)?Description:',
-            r'### \2\n\3\4Description:',
-            text,
-            flags=re.MULTILINE
-        )
-
-        # Fifth pass: Fix any duplicate ## that might have been added
-        text = re.sub(r'^##\s*##\s*', '## ', text, flags=re.MULTILINE)
-        text = re.sub(r'^###\s*###\s*', '### ', text, flags=re.MULTILINE)
-
+        
+        # Pattern 4: Common section names that should always be H2
+        common_sections = [
+            'Introduction', 'Overview', 'Conclusion', 'Summary', 
+            'Benefits', 'Advantages', 'Challenges', 'Solutions',
+            'Best Practices', 'Strategies', 'Examples', 'Use Cases',
+            'Getting Started', 'Implementation', 'Deployment'
+        ]
+        
+        for section in common_sections:
+            # Only add ## if it's on its own line and doesn't already have #
+            text = re.sub(
+                rf'\n({section})\s*\n',
+                rf'\n## \1\n',
+                text,
+                flags=re.IGNORECASE
+            )
+        
+        # Clean up any double ## that might have been added
+        text = re.sub(r'\n##\s*##\s*', '\n## ', text)
+        text = re.sub(r'\n###\s*###\s*', '\n### ', text)
+        
         return text
 
     def _build_entity_guidance(self, competitor_analysis: Dict[str, Any]) -> str:
