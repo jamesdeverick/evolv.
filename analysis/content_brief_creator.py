@@ -1,5 +1,5 @@
 # --------------------------------------------
-# Content Brief Creator
+# Content Brief Creator - Enhanced with Advanced Analysis
 # --------------------------------------------
 
 from typing import Optional, List, Dict, Any
@@ -46,7 +46,8 @@ class ContentBriefCreator:
         serp_insights: Optional[Dict[str, Any]] = None,
         tone_style: str = "Informative and friendly",
         tone_guidelines: str = "",
-        competitor_analysis: Optional[Dict[str, Any]] = None
+        competitor_analysis: Optional[Dict[str, Any]] = None,
+        advanced_analysis: Optional[Dict[str, Any]] = None  # NEW PARAMETER
     ) -> str:
         """
         Create a comprehensive content brief.
@@ -62,6 +63,8 @@ class ContentBriefCreator:
             serp_insights: SERP analysis data
             tone_style: Base tone style
             tone_guidelines: Strict ToV guidelines from uploaded doc
+            competitor_analysis: Competitor analysis data
+            advanced_analysis: Advanced SEO analysis (E-E-A-T, snippets, etc.)
 
         Returns:
             Generated content brief in Markdown
@@ -215,7 +218,157 @@ class ContentBriefCreator:
         if not clean.strip():
             return "No valid response from LLM for content brief creation."
 
+        # ADD ADVANCED ANALYSIS SECTIONS (NEW)
+        if advanced_analysis:
+            clean = self._append_advanced_analysis(clean, advanced_analysis)
+
         return clean
+
+    def _append_advanced_analysis(self, brief: str, adv: Dict[str, Any]) -> str:
+        """
+        Append advanced analysis sections to the content brief.
+        
+        Args:
+            brief: Existing brief content
+            adv: Advanced analysis dictionary
+            
+        Returns:
+            Enhanced brief with advanced sections
+        """
+        additions = []
+        
+        # E-E-A-T Requirements
+        if adv.get('eeat_signals') and not adv['eeat_signals'].get('error'):
+            eeat = adv['eeat_signals']
+            additions.append("\n\n---\n\n## 🏆 E-E-A-T Requirements (CRITICAL)\n")
+            
+            if eeat.get('is_ymyl'):
+                additions.append(f"\n⚠️ **YMYL TOPIC ({eeat.get('ymyl_category')})** - E-E-A-T is make-or-break for rankings!\n")
+            
+            if eeat.get('trust_signals'):
+                additions.append("\n### Required Trust Signals:\n")
+                additions.append("_Google expects these specific trust indicators for this topic:_\n")
+                for signal in eeat['trust_signals'][:6]:
+                    additions.append(f"- {signal}\n")
+            
+            if eeat.get('expertise_needed'):
+                additions.append("\n### Expertise Requirements:\n")
+                additions.append("_Content must demonstrate:_\n")
+                for req in eeat['expertise_needed'][:4]:
+                    additions.append(f"- {req}\n")
+            
+            if eeat.get('authority_needed'):
+                additions.append("\n### Authority Signals:\n")
+                for auth in eeat['authority_needed'][:3]:
+                    additions.append(f"- {auth}\n")
+            
+            if eeat.get('priority_actions'):
+                additions.append("\n### ⚡ PRIORITY ACTIONS:\n")
+                for action in eeat['priority_actions'][:3]:
+                    additions.append(f"**{action}**\n")
+        
+        # Featured Snippet Opportunities
+        if adv.get('featured_snippets') and not adv['featured_snippets'].get('error'):
+            snippets = adv['featured_snippets']
+            high_opps = [o for o in snippets.get('high_opportunity_queries', []) 
+                        if o.get('win_probability') in ['High', 'Medium']][:4]
+            
+            if high_opps:
+                additions.append("\n\n## ⭐ Featured Snippet Opportunities\n")
+                additions.append("_Format content to win these top-of-page placements:_\n")
+                
+                for opp in high_opps:
+                    additions.append(f"\n### Target Query: \"{opp.get('query')}\"\n")
+                    additions.append(f"**Win Probability:** {opp.get('win_probability')}\n")
+                    additions.append(f"**Format Required:** {opp.get('snippet_type').title()}\n")
+                    additions.append(f"**Optimization Guide:** {opp.get('optimization_guide')}\n")
+            
+            if snippets.get('quick_wins'):
+                additions.append("\n### 🎯 Quick Wins:\n")
+                for win in snippets['quick_wins'][:3]:
+                    additions.append(f"- {win}\n")
+        
+        # Critical Content Gaps
+        if adv.get('content_gaps') and not adv['content_gaps'].get('error'):
+            gaps = adv['content_gaps']
+            critical = [g for g in gaps.get('critical_gaps', []) if g.get('priority') in ['High', 'Medium']][:6]
+            
+            if critical:
+                additions.append("\n\n## ❌ Critical Topics to Cover\n")
+                additions.append("_Competitors cover these but you don't - HIGH PRIORITY to add:_\n")
+                
+                for gap in critical:
+                    additions.append(f"\n### {gap.get('missing_topic')}\n")
+                    additions.append(f"**Covered by:** {gap.get('covered_by')}\n")
+                    additions.append(f"**Priority:** {gap.get('priority')}\n")
+                    additions.append(f"**What to include:** {gap.get('content_suggestion')}\n")
+            
+            # Add unique angles section
+            if gaps.get('your_unique_angles'):
+                additions.append("\n### 🎁 Your Competitive Advantages\n")
+                additions.append("_Leverage these unique angles that competitors are missing:_\n")
+                for angle in gaps['your_unique_angles'][:4]:
+                    additions.append(f"- ✅ {angle}\n")
+            
+            # Add blue ocean opportunities
+            if gaps.get('blue_ocean_opportunities'):
+                additions.append("\n### 🌊 Blue Ocean Opportunities\n")
+                additions.append("_Topics NO competitor covers well - easy wins:_\n")
+                for opp in gaps['blue_ocean_opportunities'][:3]:
+                    additions.append(f"- 💎 {opp}\n")
+        
+        # User Intent Deep Dive
+        if adv.get('search_intent') and not adv['search_intent'].get('error'):
+            intent = adv['search_intent']
+            additions.append("\n\n## 🎯 User Intent & Content Expectations\n")
+            
+            additions.append(f"\n**What users actually need:** {intent.get('primary_user_need')}\n")
+            additions.append(f"\n**User journey stage:** {intent.get('user_journey_stage')}\n")
+            additions.append(f"**User sophistication:** {intent.get('sophistication_level')}\n")
+            additions.append(f"**Expected content format:** {intent.get('expected_content_format')}\n")
+            additions.append(f"**Recommended tone:** {intent.get('content_tone')}\n")
+            additions.append(f"**Recommended length:** {intent.get('content_length_recommendation')}\n")
+            
+            if intent.get('user_pain_points'):
+                additions.append("\n### 😰 User Pain Points to Address:\n")
+                for pain in intent['user_pain_points'][:5]:
+                    additions.append(f"- {pain}\n")
+            
+            if intent.get('must_include_elements'):
+                additions.append("\n### ✅ Must Include (Non-Negotiable):\n")
+                for element in intent['must_include_elements'][:6]:
+                    additions.append(f"- {element}\n")
+            
+            if intent.get('success_criteria'):
+                additions.append(f"\n**User success criteria:** {intent.get('success_criteria')}\n")
+        
+        # Topical Authority
+        if adv.get('topical_authority') and not adv['topical_authority'].get('error'):
+            ta = adv['topical_authority']
+            
+            if ta.get('authority_score'):
+                additions.append(f"\n\n## 📊 Topical Authority Score: {ta.get('authority_score')}/100\n")
+            
+            if ta.get('missing_subtopics'):
+                additions.append("\n### Missing Subtopics (Add These):\n")
+                for topic in ta['missing_subtopics'][:5]:
+                    additions.append(f"- {topic}\n")
+            
+            if ta.get('depth_issues'):
+                additions.append("\n### Content Depth Issues:\n")
+                for issue in ta['depth_issues'][:4]:
+                    additions.append(f"- {issue}\n")
+            
+            if ta.get('semantic_gaps'):
+                additions.append("\n### Entities/Concepts to Mention:\n")
+                for gap in ta['semantic_gaps'][:6]:
+                    additions.append(f"- {gap}\n")
+        
+        # Append all additions to the brief
+        if additions:
+            brief += "".join(additions)
+        
+        return brief
 
     def _enforce_markdown_headings(self, text: str) -> str:
         """
