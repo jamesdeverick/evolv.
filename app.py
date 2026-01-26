@@ -641,6 +641,7 @@ def show_step4():
                     tone_style=st.session_state.brief_tone,
                     tone_guidelines=strict_tov_text,
                     competitor_analysis=st.session_state.competitor_analysis,
+                    advanced_analysis=st.session_state.get('advanced_analysis')
                 )
 
             if st.session_state.generated_brief_content and not st.session_state.generated_brief_content.startswith("Error"):
