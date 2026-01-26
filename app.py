@@ -26,6 +26,7 @@ from analysis.keyword_analyzer import KeywordAnalyzer, KeywordClusterer
 from analysis.keyword_extraction import extract_and_filter_keywords
 from analysis.competitive_analyzer import CompetitiveAnalyzer
 from analysis.content_brief_creator import ContentBriefCreator
+from advanced_seo_addon import show_advanced_analysis_section
 
 # Optional plotting
 try:
@@ -456,7 +457,10 @@ def show_step2():
             for cluster_name, keywords in st.session_state.keyword_clusters.items():
                 with st.expander(f"{cluster_name} ({len(keywords)} keywords)"):
                     st.write(", ".join(keywords))
-
+                    
+    # Advanced SEO analysis (optional)
+    show_advanced_analysis_section()
+    
     # Navigation
     col1, col2 = st.columns(2)
     with col1:
