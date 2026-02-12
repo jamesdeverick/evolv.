@@ -707,14 +707,14 @@ def show_step4():
                 )
 
             if st.session_state.generated_brief_content and not st.session_state.generated_brief_content.startswith("Error"):
-    # Enhance with page type requirements
-    st.session_state.generated_brief_content = PageTypeManager.enhance_brief_for_page_type(
-        st.session_state.generated_brief_content,
-        st.session_state.get('page_type', 'blog_post')
-    )
-    
-    st.subheader("📝 Generated Content Brief")
-    st.markdown(st.session_state.generated_brief_content)
+                # Enhance with page type requirements
+                st.session_state.generated_brief_content = PageTypeManager.enhance_brief_for_page_type(
+                    st.session_state.generated_brief_content,
+                    st.session_state.get('page_type', 'blog_post')
+                )
+                
+                st.subheader("📝 Generated Content Brief")
+                st.markdown(st.session_state.generated_brief_content)
             else:
                 st.error("Failed to generate content brief.")
 
