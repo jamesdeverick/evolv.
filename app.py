@@ -27,6 +27,7 @@ from analysis.keyword_extraction import extract_and_filter_keywords
 from analysis.competitive_analyzer import CompetitiveAnalyzer
 from analysis.content_brief_creator import ContentBriefCreator
 from advanced_seo_addon import show_advanced_analysis_section
+from page_optimizer import PageTypeManager, WireframeGenerator
 
 # Optional plotting
 try:
@@ -215,29 +216,47 @@ clusterer = KeywordClusterer()
 def show_step1():
     """Step 1: Enter audit topic and client info."""
     st.header("Step 1: Enter Audit Topic & Client Info")
-
     st.session_state.query_topic = st.text_input(
         "Main Topic / Target Query (e.g., 'corporate budgeting'):",
         st.session_state.query_topic
     )
-
     st.session_state.client_url = st.text_input(
         "Client URL (optional):",
         st.session_state.client_url,
         help="Leave blank if this is net-new content."
     )
-
     st.session_state.desired_content_intent = st.selectbox(
         "Desired Content Intent for Supporting Keywords:",
         CONTENT_TYPES,
         index=CONTENT_TYPES.index(st.session_state.desired_content_intent)
     )
-
+    
+    # ADD THIS SECTION - Page Type Selection
+    st.divider()
+    st.subheader("📄 Page Type")
+    st.info("Select the type of page you're creating to get tailored content requirements")
+    
+    page_types = PageTypeManager.get_all_page_types()
+    st.session_state.page_type = st.selectbox(
+        "What type of page are you creating?",
+        options=list(page_types.keys()),
+        format_func=lambda x: page_types[x],
+        index=0
+    )
+    
+    # Show page type info
+    page_info = PageTypeManager.get_page_type_info(st.session_state.page_type)
+    with st.expander("ℹ️ About this page type"):
+        st.markdown(f"**Purpose:** {page_info['description']}")
+        st.markdown(f"**Typical Length:** {page_info['typical_length']}")
+        st.markdown(f"**SEO Focus:** {page_info['seo_focus']}")
+    st.divider()
+    # END OF NEW SECTION
+    
     uploaded_file = st.file_uploader(
         "Upload Audit Findings (Markdown/Text/PDF)",
         type=["md", "txt", "pdf"]
     )
-
     if uploaded_file is not None:
         try:
             # Handle PDF
@@ -254,14 +273,12 @@ def show_step1():
                     st.error(f"PDF read error: {e}")
             else:
                 st.session_state.report_content = uploaded_file.getvalue().decode("utf-8", errors="replace")
-
             st.success(f"File '{uploaded_file.name}' uploaded.")
             with st.expander("Preview Uploaded Content"):
                 preview = st.session_state.report_content
                 st.code(preview[:1000] + "..." if len(preview) > 1000 else preview, language="markdown")
         except Exception as e:
             st.error(f"Error reading file: {e}")
-
     # Display Scrapingdog status
     st.subheader("Scrapingdog Connection")
     si = status_info
@@ -274,12 +291,10 @@ def show_step1():
         st.error(f"Not usable (HTTP {si['http_status']}).")
         with st.expander("Server body (first 300 chars)"):
             st.code(si["body_sample"])
-
     if st.button("Proceed to Keyword Research (Step 2)", type="primary"):
         if not st.session_state.query_topic:
             st.warning("Please enter a main topic/target query.")
             return
-
         with st.spinner("Performing initial keyword research and SERP analysis..."):
             scrapingdog = get_scrapingdog_client()
             keyword_analyzer = KeywordAnalyzer(scrapingdog)
@@ -497,24 +512,19 @@ def show_step3():
         f"**{st.session_state.query_topic}**. This works even when there is **no existing "
         f"client URL** (net-new content)."
     )
-
     # Build context
     kw_df = st.session_state.analyzed_keywords_df if st.session_state.analyzed_keywords_df is not None else pd.DataFrame()
     top_kw_list = []
     if not kw_df.empty and "Keyword" in kw_df.columns:
         top_kw_list = kw_df["Keyword"].dropna().astype(str).head(25).tolist()
-
     serp_summary = st.session_state.serp_insights or {
         "common_themes": "", "gaps_to_exploit": "", "unique_angles": ""
     }
-
     default_review_prompt = f"""
 You are an SEO content strategist.
-
 Goal: produce a crisp gap/opportunity analysis and a **proposed content outline** for a NEW PAGE targeting:
 - Main topic: **{st.session_state.query_topic}**
 - If an existing client page is unavailable, base recommendations on SERP insights and the keyword list.
-
 Client URL: {st.session_state.client_url or '[No existing page — new content required]'}
 ---
 Client Webpage Content (extracted):
@@ -538,13 +548,11 @@ Please return a concise analysis with:
 4) On-page SEO elements (Title/H1/Meta/URL)
 5) 3–5 FAQs with concise answers
 """.strip()
-
     review_prompt = st.text_area(
         "Enter your prompt for the LLM review:",
         value=default_review_prompt,
         height=400
     )
-
     if st.button("Run LLM Analysis", type="primary"):
         with st.spinner(f"Sending content to {llm_client.model} for analysis..."):
             result = llm_client.complete(review_prompt, temperature=0.7, max_tokens=2000)
@@ -553,7 +561,61 @@ Please return a concise analysis with:
             st.markdown(result)
             if not result.startswith("Error"):
                 st.session_state.current_step = 4
-
+    
+    # ADD THIS SECTION - Wireframe Generator
+    if st.session_state.client_url and st.session_state.fetched_webpage_content:
+        st.divider()
+        st.subheader("🎨 Page Optimization Wireframe")
+        st.info("Analyze the actual HTML structure to show optimization opportunities")
+        
+        if st.button("Generate Wireframe", type="secondary"):
+            with st.spinner("Parsing HTML and generating wireframe..."):
+                wireframe_gen = WireframeGenerator()
+                wireframe = wireframe_gen.generate_wireframe(
+                    url=st.session_state.client_url,
+                    html_content=st.session_state.fetched_webpage_content,
+                    page_type=st.session_state.get('page_type', 'blog_post'),
+                    keyword=st.session_state.get('selected_brief_keyword', st.session_state.query_topic)
+                )
+                st.session_state.wireframe = wireframe
+        
+        # Display wireframe if generated
+        if st.session_state.get('wireframe'):
+            wf = st.session_state.wireframe
+            
+            # Show HTML structure score
+            if wf.get('html_structure_score') is not None:
+                score = wf['html_structure_score']
+                color = "🟢" if score >= 70 else "🟡" if score >= 40 else "🔴"
+                st.metric("HTML Structure Score", f"{color} {score}/100")
+            
+            # Show current issues
+            st.markdown("### 📊 Current Page Issues")
+            for issue in wf.get('current_issues', []):
+                st.warning(f"❌ {issue}")
+            
+            # Show recommended structure
+            st.markdown("### ✨ Recommended Page Structure")
+            for i, section in enumerate(wf.get('recommended_sections', []), 1):
+                status_emoji = "✅" if section.get('current_status') == 'present' else "⚠️" if section.get('current_status') == 'needs_improvement' else "❌"
+                
+                with st.expander(f"{status_emoji} {i}. {section.get('name', 'Section')}"):
+                    st.markdown(f"**Purpose:** {section.get('purpose', 'N/A')}")
+                    if section.get('current_status'):
+                        st.markdown(f"**Status:** {section.get('current_status', 'unknown').replace('_', ' ').title()}")
+                    st.markdown("**Elements to include:**")
+                    for elem in section.get('elements', []):
+                        st.markdown(f"- {elem}")
+            
+            # Show priority fixes
+            if wf.get('priority_fixes'):
+                st.markdown("### 🎯 Priority Fixes")
+                for fix in wf['priority_fixes']:
+                    impact_emoji = "🔥" if fix.get('impact') == 'high' else "⚡" if fix.get('impact') == 'medium' else "✓"
+                    effort_emoji = "🟢" if fix.get('effort') == 'low' else "🟡" if fix.get('effort') == 'medium' else "🔴"
+                    st.write(f"{impact_emoji} **{fix.get('fix')}** (Impact: {fix.get('impact')}, Effort: {effort_emoji} {fix.get('effort')})")
+    # END OF NEW SECTION
+    
     # Navigation
     c1, c2 = st.columns(2)
     with c1:
@@ -564,7 +626,6 @@ Please return a concise analysis with:
         if st.button("Proceed to Brief Generation (Step 4)"):
             st.session_state.current_step = 4
             st.rerun()
-
 
 # ========== Step 4: Generate Content Brief ==========
 def show_step4():
@@ -641,12 +702,19 @@ def show_step4():
                     tone_style=st.session_state.brief_tone,
                     tone_guidelines=strict_tov_text,
                     competitor_analysis=st.session_state.competitor_analysis,
-                    advanced_analysis=st.session_state.get('advanced_analysis')
+                    advanced_analysis=st.session_state.get('advanced_analysis'
+                    page_type=st.session_state.get('page_type', 'blog_post')
                 )
 
             if st.session_state.generated_brief_content and not st.session_state.generated_brief_content.startswith("Error"):
-                st.subheader("📝 Generated Content Brief")
-                st.markdown(st.session_state.generated_brief_content)
+    # Enhance with page type requirements
+    st.session_state.generated_brief_content = PageTypeManager.enhance_brief_for_page_type(
+        st.session_state.generated_brief_content,
+        st.session_state.get('page_type', 'blog_post')
+    )
+    
+    st.subheader("📝 Generated Content Brief")
+    st.markdown(st.session_state.generated_brief_content)
             else:
                 st.error("Failed to generate content brief.")
 
