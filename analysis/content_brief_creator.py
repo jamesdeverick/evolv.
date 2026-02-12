@@ -47,7 +47,8 @@ class ContentBriefCreator:
         tone_style: str = "Informative and friendly",
         tone_guidelines: str = "",
         competitor_analysis: Optional[Dict[str, Any]] = None,
-        advanced_analysis: Optional[Dict[str, Any]] = None  # NEW PARAMETER
+        advanced_analysis: Optional[Dict[str, Any]] = None,
+        page_type: str = "blog_post"
     ) -> str:
         """
         Create a comprehensive content brief.
@@ -65,6 +66,7 @@ class ContentBriefCreator:
             tone_guidelines: Strict ToV guidelines from uploaded doc
             competitor_analysis: Competitor analysis data
             advanced_analysis: Advanced SEO analysis (E-E-A-T, snippets, etc.)
+            page_type: Type of page (blog_post, product_page, landing_page, etc.)
 
         Returns:
             Generated content brief in Markdown
