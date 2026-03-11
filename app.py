@@ -312,196 +312,128 @@ def show_step1():
         st.rerun()
 
 
-# ========== Step 2: Review & Select Keywords ==========
-def show_step2():
-    """Step 2: Review and select keywords."""
-    st.header("Step 2: Review & Select Keywords")
-    st.info("Review brainstormed keywords and SERP insights. Select the ones to target in your content.")
+# KEYWORD CLUSTERING INTEGRATION GUIDE
 
-    # Display SERP insights
-    if st.session_state.serp_insights:
-        st.subheader("🌐 Key SERP Insights")
-        si = st.session_state.serp_insights
-        st.markdown(f"**Common Themes:** {si.get('common_themes','N/A')}")
-        st.markdown(f"**Gaps to Exploit:** {si.get('gaps_to_exploit','N/A')}")
-        st.markdown(f"**Unique Angles:** {si.get('unique_angles','N/A')}")
-        st.markdown("---")
+## What This Does
 
-    # Display and edit keyword table
-    if st.session_state.analyzed_keywords_df is not None and not st.session_state.analyzed_keywords_df.empty:
-        st.subheader(f"📊 Top Keywords for '{st.session_state.query_topic}':")
-        edited = st.data_editor(
-            st.session_state.analyzed_keywords_df,
-            column_config={
-                "Selected": st.column_config.CheckboxColumn("Target?", default=True),
-                "Keyword": "Keyword Phrase",
-                "Inferred Potential Score": st.column_config.NumberColumn("Score", format="%.1f"),
-                "Content Type": st.column_config.TextColumn("Intent"),
-                "Requires Own Content": "Own Page?",
-                "Rationale for Own Page": "Rationale",
-                "Semantically Related Keywords": "Related Keywords for Grouping"
-            },
-            num_rows="dynamic",
-            use_container_width=True,
-            key="keyword_selection_data_editor"
-        )
-        st.session_state.analyzed_keywords_df = edited
-        st.session_state.analyzed_keywords_df["Selected"] = st.session_state.analyzed_keywords_df["Selected"].astype(bool)
+**Problem:** You get 50-100 keywords but many aren't relevant to your main topic - they're for different subtopics, intents, or tangential queries.
 
-        # Update primary keyword selection
-        selected_rows = st.session_state.analyzed_keywords_df[st.session_state.analyzed_keywords_df["Selected"]]
-        if not selected_rows.empty:
-            st.session_state.selected_brief_keyword = selected_rows.sort_values(
-                by="Inferred Potential Score", ascending=False
-            ).iloc[0]["Keyword"]
-            st.session_state.related_keywords_for_brief = selected_rows[
-                (selected_rows["Keyword"].str.lower() != st.session_state.selected_brief_keyword.lower())
-            ]["Keyword"].tolist()
-            st.info(f"Primary Keyword for Brief: **{st.session_state.selected_brief_keyword}**")
-            st.markdown("Related Keywords (sample): " + ", ".join(st.session_state.related_keywords_for_brief[:10]) + ".")
-        else:
-            st.warning("Select at least one keyword for the content brief.")
-            st.session_state.selected_brief_keyword = None
+**Solution:** Automatically groups keywords into semantic clusters so you can:
+- See which keyword groups exist (e.g., "How-To Guides", "Pricing", "Comparisons")
+- Select only relevant clusters for your content
+- Get focused keyword lists instead of keyword soup
 
-        # Keyword visualization
-        freq = st.session_state.analyzed_keywords_df["Keyword"].str.lower().value_counts().head(20)
-        if not freq.empty:
-            st.subheader("Keyword Frequency (Top 20)")
-            if PLOTLY_AVAILABLE:
-                fig = go.Figure()
-                fig.add_bar(x=freq.index.str.slice(0, 40), y=freq.values)
-                fig.update_layout(title="Keyword Frequency (Top 20)", xaxis_title="Keyword", yaxis_title="Count")
-                st.plotly_chart(fig, use_container_width=True)
-            else:
-                st.bar_chart(freq)
+## Example Output
 
-        # Additional analysis tools
-        st.divider()
-        st.subheader("Optional: Competitor & Clustering Tools")
+**Main Keyword:** "corporate budgeting"
 
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            num_comp = st.number_input("Top competitors to analyze", 1, 10, 3, step=1)
-        with c2:
-            run_comp_btn = st.button("Run Competitive Analysis")
-        with c3:
-            run_cluster_btn = st.button("Cluster Top Keywords")
+**Clusters Found:**
+1. ✅ **Budget Planning** (15 keywords, 85% relevant) - Main topic
+   - corporate budget planning, budget planning process, annual budget planning...
+2. ⚡ **Software/Tools** (12 keywords, 72% relevant)
+   - budgeting software, budget tools, corporate budget template...
+3. 📊 **How-To Guides** (8 keywords, 68% relevant)
+   - how to create corporate budget, how to manage budget...
+4. 💰 **Cost Management** (6 keywords, 45% relevant)
+   - cost reduction strategies, expense management...
+5. ❓ **Definitions** (4 keywords, 35% relevant)
+   - what is corporate budgeting, budgeting definition...
 
-        if run_comp_btn:
-            if not st.session_state.selected_brief_keyword:
-                st.warning("Select a main keyword first (checkbox) to analyze competitors.")
-            else:
-                with st.spinner("Analyzing competitors..."):
-                    scrapingdog = get_scrapingdog_client()
-                    competitive_analyzer = CompetitiveAnalyzer(scrapingdog)
-                    st.session_state.competitor_analysis = competitive_analyzer.analyze_competitors(
-                        st.session_state.selected_brief_keyword,
-                        num_competitors=int(num_comp)
-                    )
+**User selects:** Clusters 1, 2, 3 → Gets 35 focused keywords instead of 50+ mixed ones
 
-        # Display competitor analysis
-        if st.session_state.competitor_analysis:
-            comp = st.session_state.competitor_analysis
-            st.markdown(f"**Average word count (successful pages):** {comp.get('avg_word_count', 0)}")
-            if comp.get("common_headings"):
-                st.markdown("**Common headings across competitors:**")
-                for h in comp["common_headings"]:
-                    st.write(f"- {h}")
+## Files to Add
 
-            # Display entity analysis for generative search optimization
-            if comp.get("entity_analysis"):
-                st.markdown("---")
-                st.markdown("**🤖 Entity Analysis (Generative Search Optimization)**")
-                entity_stats = comp["entity_analysis"]
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.metric("Avg Organizations", entity_stats.get("avg_orgs_mentioned", 0))
-                with col2:
-                    st.metric("Avg People/Experts", entity_stats.get("avg_people_mentioned", 0))
-                with col3:
-                    st.metric("Unique Orgs", entity_stats.get("total_unique_orgs", 0))
+1. **keyword_clustering.py** → `analysis/` folder (NEW)
 
-            # Display common entities mentioned by multiple competitors
-            if comp.get("common_entities"):
-                with st.expander("📊 Common Entities Across Competitors (AI Citation Signals)"):
-                    st.markdown("_These entities appear in multiple competitor articles - AI models expect to see these mentioned:_")
-                    common_ents = comp["common_entities"]
-                    for ent_type, entities in common_ents.items():
-                        if entities:
-                            st.markdown(f"**{ent_type}:**")
-                            for entity, count in entities[:10]:  # Top 10
-                                st.write(f"- {entity} (mentioned in {count} sources)")
+## Integration in app.py - Step 2
 
-            if comp.get("competitors"):
-                comp_df = pd.DataFrame([
-                    {
-                        "Title": c.get("title",""),
-                        "URL": c.get("url",""),
-                        "WordCount": c.get("word_count",0),
-                        "Snippet": c.get("snippet","")
-                    }
-                    for c in comp.get("competitors", [])
-                ])
-                st.dataframe(comp_df, use_container_width=True, hide_index=True)
+### After keyword analysis completes, add clustering:
 
-                if PLOTLY_AVAILABLE and not comp_df.empty:
-                    try:
-                        fig = go.Figure()
-                        fig.add_bar(x=comp_df["Title"].str.slice(0, 40), y=comp_df["WordCount"])
-                        fig.update_layout(
-                            title="Word count of analyzed competitor pages",
-                            xaxis_title="Title (truncated)",
-                            yaxis_title="Word Count"
-                        )
-                        st.plotly_chart(fig, use_container_width=True)
-                    except Exception:
-                        pass
+```python
+# In show_step2(), after keyword analysis is done:
 
-        if run_cluster_btn:
-            if st.session_state.analyzed_keywords_df is None or st.session_state.analyzed_keywords_df.empty:
-                st.warning("No keywords available to cluster.")
-            else:
-                with st.spinner("Clustering top keywords with the LLM..."):
-                    st.session_state.keyword_clusters = clusterer.create_clusters(
-                        st.session_state.analyzed_keywords_df
-                    )
-
-        # Display clusters
-        if st.session_state.keyword_clusters:
-            st.subheader("📁 Keyword Clusters")
-            for cluster_name, keywords in st.session_state.keyword_clusters.items():
-                with st.expander(f"{cluster_name} ({len(keywords)} keywords)"):
-                    st.write(", ".join(keywords))
-                    
-    # Advanced SEO analysis (optional)
-    show_advanced_analysis_section()
+if st.session_state.analyzed_keywords_df is not None and not st.session_state.analyzed_keywords_df.empty:
+    st.divider()
+    st.subheader("🎯 Keyword Clustering")
+    st.info("Group keywords by topic to focus on relevant clusters")
     
-    # Navigation
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("Back to Step 1"):
-            st.session_state.current_step = 1
-            st.rerun()
-    with col2:
-        if st.button("Proceed to Audit Analysis (Step 3)", type="primary"):
-            if st.session_state.selected_brief_keyword:
-                st.session_state.current_step = 3
-                # Fetch webpage if URL provided
-                if st.session_state.client_url:
-                    with st.spinner(f"Fetching {st.session_state.client_url}"):
-                        page = fetch_and_parse_url(st.session_state.client_url)
-                        if page.startswith(("Error", "No substantial content")):
-                            st.warning(f"Could not retrieve webpage content: {page}")
-                            st.session_state.fetched_webpage_content = ""
-                        else:
-                            st.success("Webpage content fetched.")
-                            st.session_state.fetched_webpage_content = page
-                else:
-                    st.session_state.fetched_webpage_content = ""
+    # Import clusterer
+    from analysis.keyword_clustering import KeywordClusterer
+    
+    # Run clustering
+    if st.button("Cluster Keywords by Topic", type="secondary"):
+        with st.spinner("Clustering keywords..."):
+            clusterer = KeywordClusterer()
+            clustering_result = clusterer.cluster_keywords(
+                keywords_df=st.session_state.analyzed_keywords_df,
+                main_keyword=st.session_state.query_topic,
+                max_clusters=8
+            )
+            st.session_state.keyword_clusters = clustering_result
+    
+    # Display clusters
+    if st.session_state.get('keyword_clusters'):
+        clusters = st.session_state.keyword_clusters
+        
+        st.markdown(f"### Found {clusters['total_clusters']} Keyword Groups")
+        st.markdown(f"*Total keywords: {clusters['total_keywords']}*")
+        
+        # Show each cluster
+        cluster_selections = []
+        
+        for i, cluster in enumerate(clusters['clusters']):
+            is_main = (i == clusters.get('main_topic_cluster'))
+            
+            col1, col2 = st.columns([3, 1])
+            
+            with col1:
+                # Checkbox for selection
+                default_selected = is_main or cluster.get('relevance_score', 0) > 50
+                selected = st.checkbox(
+                    f"{'✅ ' if is_main else ''}{cluster['name']}",
+                    value=default_selected,
+                    key=f"cluster_{i}"
+                )
+                
+                if selected:
+                    cluster_selections.append(cluster['name'])
+            
+            with col2:
+                # Metrics
+                st.metric("Keywords", cluster['size'])
+                st.metric("Relevance", f"{cluster.get('relevance_score', 0)}%")
+            
+            # Expandable details
+            with st.expander(f"View {cluster['size']} keywords in this group"):
+                st.markdown(f"**Average Score:** {cluster.get('avg_keyword_score', 0)}")
+                st.markdown(f"**PAA Questions:** {cluster.get('paa_percentage', 0)}%")
+                
+                if cluster.get('theme_words'):
+                    st.markdown(f"**Theme:** {', '.join(cluster['theme_words'])}")
+                
+                # Show keywords
+                for kw in cluster['keywords'][:10]:
+                    st.write(f"- {kw}")
+                
+                if len(cluster['keywords']) > 10:
+                    st.write(f"*...and {len(cluster['keywords']) - 10} more*")
+        
+        # Apply filter button
+        st.divider()
+        if st.button("Apply Selected Clusters", type="primary"):
+            if cluster_selections:
+                # Filter DataFrame to selected clusters
+                filtered_df = clusterer.filter_keywords_by_clusters(
+                    keywords_df=st.session_state.analyzed_keywords_df,
+                    selected_cluster_names=cluster_selections,
+                    clustering_result=st.session_state.keyword_clusters
+                )
+                
+                st.session_state.analyzed_keywords_df = filtered_df
+                st.success(f"✅ Filtered to {len(filtered_df)} keywords from {len(cluster_selections)} clusters")
                 st.rerun()
             else:
-                st.warning("Select a primary keyword for the brief before proceeding.")
-
+                st.warning("Select at least one cluster")
 
 # ========== Step 3: LLM Audit Analysis ==========
 def show_step3():
