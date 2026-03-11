@@ -445,8 +445,8 @@ def show_step2():
         selected_rows = st.session_state.analyzed_keywords_df[st.session_state.analyzed_keywords_df["Selected"]]
         if not selected_rows.empty:
             st.session_state.selected_brief_keyword = selected_rows.sort_values(
-                by="Score", ascending=False
-            ).iloc[0]["Keyword"]
+                by="Inferred Potential Score", ascending=False
+        ).iloc[0]["Keyword"]
             st.session_state.related_keywords_for_brief = selected_rows[
                 (selected_rows["Keyword"].str.lower() != st.session_state.selected_brief_keyword.lower())
             ]["Keyword"].tolist()
