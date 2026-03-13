@@ -244,25 +244,25 @@ class KeywordClusterer:
             
             # Calculate average score from keywords_df
             avg_score = 0
-            if 'Score' in keywords_df.columns:
+            if 'Inferred Potential Score' in keywords_df.columns:
                 cluster_kws = keywords_df[keywords_df['Keyword'].isin(cluster['keywords'])]
                 if not cluster_kws.empty:
-                    avg_score = cluster_kws['Score'].mean()
+                    avg_score = cluster_kws['Inferred Potential Score'].mean()
             
             # Calculate PAA percentage
             paa_pct = 0
             if 'Is PAA' in keywords_df.columns:
-            cluster_kws = keywords_df[keywords_df['Keyword'].isin(cluster['keywords'])]
-            if not cluster_kws.empty:
-                # Handle both boolean and string values
-                if cluster_kws['Is PAA'].dtype == 'object':
-                    # It's a string column (Yes/No or True/False strings)
-                    paa_count = cluster_kws['Is PAA'].astype(str).str.lower().isin(['yes', 'true', '1']).sum()
-                else:
-                    # It's already boolean or numeric
-                    paa_count = cluster_kws['Is PAA'].sum()
-        
-            paa_pct = (paa_count / len(cluster_kws)) * 100
+                cluster_kws = keywords_df[keywords_df['Keyword'].isin(cluster['keywords'])]
+                if not cluster_kws.empty:
+                    # Handle both boolean and string values
+                    if cluster_kws['Is PAA'].dtype == 'object':
+                        # It's a string column (Yes/No or True/False strings)
+                        paa_count = cluster_kws['Is PAA'].astype(str).str.lower().isin(['yes', 'true', '1']).sum()
+                    else:
+                        # It's already boolean or numeric
+                        paa_count = cluster_kws['Is PAA'].sum()
+                    
+                    paa_pct = (paa_count / len(cluster_kws)) * 100
             
             # Combined relevance score
             relevance = (word_overlap * 20) + (avg_score * 0.5) + (paa_pct * 0.3)
