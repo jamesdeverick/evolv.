@@ -657,7 +657,7 @@ if st.session_state.llm_analysis_output and not st.session_state.llm_analysis_ou
         
         # Display revisions (same as before)
         if st.session_state.get('content_revisions'):
-            # ... rest of display code ...
+        pass    # ... rest of display code ...
 
 # THEN the navigation section:
 c1, c2 = st.columns(2)
