@@ -231,7 +231,7 @@ def show_step1():
         index=CONTENT_TYPES.index(st.session_state.desired_content_intent)
     )
     
-    # ADD THIS SECTION - Page Type Selection
+    # Page Type Selection
     st.divider()
     st.subheader("📄 Page Type")
     st.info("Select the type of page you're creating to get tailored content requirements")
@@ -251,7 +251,6 @@ def show_step1():
         st.markdown(f"**Typical Length:** {page_info['typical_length']}")
         st.markdown(f"**SEO Focus:** {page_info['seo_focus']}")
     st.divider()
-    # END OF NEW SECTION
     
     uploaded_file = st.file_uploader(
         "Upload Audit Findings (Markdown/Text/PDF)",
@@ -279,6 +278,7 @@ def show_step1():
                 st.code(preview[:1000] + "..." if len(preview) > 1000 else preview, language="markdown")
         except Exception as e:
             st.error(f"Error reading file: {e}")
+    
     # Display Scrapingdog status
     st.subheader("Scrapingdog Connection")
     si = status_info
@@ -291,6 +291,7 @@ def show_step1():
         st.error(f"Not usable (HTTP {si['http_status']}).")
         with st.expander("Server body (first 300 chars)"):
             st.code(si["body_sample"])
+    
     if st.button("Proceed to Keyword Research (Step 2)", type="primary"):
         if not st.session_state.query_topic:
             st.warning("Please enter a main topic/target query.")
@@ -331,7 +332,7 @@ def show_step2():
     if st.session_state.analyzed_keywords_df is not None and not st.session_state.analyzed_keywords_df.empty:
         st.subheader(f"📊 Top Keywords for '{st.session_state.query_topic}':")
         
-        # KEYWORD CLUSTERING SECTION (NEW/UPDATED)
+        # KEYWORD CLUSTERING SECTION
         st.divider()
         col1, col2 = st.columns([2, 1])
         
@@ -427,7 +428,7 @@ def show_step2():
             column_config={
                 "Selected": st.column_config.CheckboxColumn("Target?", default=True),
                 "Keyword": "Keyword Phrase",
-                "Score": st.column_config.NumberColumn("Score", format="%.1f"),
+                "Inferred Potential Score": st.column_config.NumberColumn("Score", format="%.1f"),
                 "Grade": "Grade",
                 "Is PAA": st.column_config.CheckboxColumn("PAA?"),
                 "Content Type": st.column_config.TextColumn("Intent"),
@@ -446,7 +447,7 @@ def show_step2():
         if not selected_rows.empty:
             st.session_state.selected_brief_keyword = selected_rows.sort_values(
                 by="Inferred Potential Score", ascending=False
-        ).iloc[0]["Keyword"]
+            ).iloc[0]["Keyword"]
             st.session_state.related_keywords_for_brief = selected_rows[
                 (selected_rows["Keyword"].str.lower() != st.session_state.selected_brief_keyword.lower())
             ]["Keyword"].tolist()
@@ -529,11 +530,11 @@ def show_step2():
     # Navigation
     col1, col2 = st.columns(2)
     with col1:
-        if st.button("Back to Step 1"):
+        if st.button("Back to Step 1", key="step2_back"):
             st.session_state.current_step = 1
             st.rerun()
     with col2:
-        if st.button("Proceed to Audit Analysis (Step 3)", type="primary"):
+        if st.button("Proceed to Audit Analysis (Step 3)", type="primary", key="step2_next"):
             if st.session_state.selected_brief_keyword:
                 st.session_state.current_step = 3
                 # Fetch webpage if URL provided
@@ -552,6 +553,7 @@ def show_step2():
             else:
                 st.warning("Select a primary keyword for the brief before proceeding.")
 
+
 # ========== Step 3: LLM Audit Analysis ==========
 def show_step3():
     """Step 3: Get LLM audit analysis."""
@@ -561,6 +563,7 @@ def show_step3():
         f"**{st.session_state.query_topic}**. This works even when there is **no existing "
         f"client URL** (net-new content)."
     )
+    
     # Build context
     kw_df = st.session_state.analyzed_keywords_df if st.session_state.analyzed_keywords_df is not None else pd.DataFrame()
     top_kw_list = []
@@ -569,6 +572,7 @@ def show_step3():
     serp_summary = st.session_state.serp_insights or {
         "common_themes": "", "gaps_to_exploit": "", "unique_angles": ""
     }
+    
     default_review_prompt = f"""
 You are an SEO content strategist.
 Goal: produce a crisp gap/opportunity analysis and a **proposed content outline** for a NEW PAGE targeting:
@@ -597,12 +601,14 @@ Please return a concise analysis with:
 4) On-page SEO elements (Title/H1/Meta/URL)
 5) 3–5 FAQs with concise answers
 """.strip()
+    
     review_prompt = st.text_area(
         "Enter your prompt for the LLM review:",
         value=default_review_prompt,
         height=400
     )
-    if st.button("Run LLM Analysis", type="primary"):
+    
+    if st.button("Run LLM Analysis", type="primary", key="run_llm_analysis"):
         with st.spinner(f"Sending content to {llm_client.model} for analysis..."):
             result = llm_client.complete(review_prompt, temperature=0.7, max_tokens=2000)
             st.session_state.llm_analysis_output = result
@@ -610,68 +616,14 @@ Please return a concise analysis with:
             st.markdown(result)
             if not result.startswith("Error"):
                 st.session_state.current_step = 4
-# ADD THE REVISION TRACKER HERE (after LLM analysis):
-if st.session_state.llm_analysis_output and not st.session_state.llm_analysis_output.startswith("Error"):
-    if st.session_state.fetched_webpage_content and st.session_state.client_url:
-        st.divider()
-        st.subheader("📝 Content Revision Tracker")
-        st.info("Generate specific, tracked-changes style revisions based on the analysis")
-        
-        if st.button("Generate Revision Recommendations", type="secondary"):
-            from analysis.content_reviser import ContentReviser
-            
-            with st.spinner("Analyzing content and proposing specific revisions..."):
-                reviser = ContentReviser()
-                
-                # Gather gap data from previous steps
-                keyword_gaps = []
-                if st.session_state.analyzed_keywords_df is not None:
-                    selected_kws = st.session_state.analyzed_keywords_df[
-                        st.session_state.analyzed_keywords_df.get('Selected', False) == True
-                    ]
-                    keyword_gaps = selected_kws['Keyword'].tolist()[:20]
-                
-                entity_gaps = []
-                if st.session_state.competitor_analysis:
-                    comp = st.session_state.competitor_analysis
-                    if comp.get('common_entities'):
-                        for ent_type, entities in comp['common_entities'].items():
-                            entity_gaps.extend([e[0] for e in entities[:5]])
-                
-                eeat_reqs = None
-                if st.session_state.get('advanced_analysis'):
-                    eeat_reqs = st.session_state['advanced_analysis'].get('eeat_signals')
-                
-                # Generate revisions
-                revisions = reviser.analyze_and_propose_revisions(
-                    page_content=st.session_state.fetched_webpage_content,
-                    target_keyword=st.session_state.query_topic,
-                    keyword_gaps=keyword_gaps,
-                    entity_gaps=entity_gaps,
-                    competitor_analysis=st.session_state.competitor_analysis,
-                    eeat_requirements=eeat_reqs,
-                    url=st.session_state.client_url
-                )
-                
-                st.session_state.content_revisions = revisions
-        
-        # Display revisions (same as before)
-        if st.session_state.get('content_revisions'):
-            pass    # ... rest of display code ...
-
-# THEN the navigation section:
-c1, c2 = st.columns(2)
-with c1:
-    if st.button("Back to Keyword Selection (Step 2)"):
-        ...
     
-    # ADD THIS SECTION - Wireframe Generator
+    # Wireframe Generator Section
     if st.session_state.client_url and st.session_state.fetched_webpage_content:
         st.divider()
         st.subheader("🎨 Page Optimization Wireframe")
         st.info("Analyze the actual HTML structure to show optimization opportunities")
         
-        if st.button("Generate Wireframe", type="secondary"):
+        if st.button("Generate Wireframe", type="secondary", key="generate_wireframe"):
             with st.spinner("Parsing HTML and generating wireframe..."):
                 wireframe_gen = WireframeGenerator()
                 wireframe = wireframe_gen.generate_wireframe(
@@ -717,18 +669,19 @@ with c1:
                     impact_emoji = "🔥" if fix.get('impact') == 'high' else "⚡" if fix.get('impact') == 'medium' else "✓"
                     effort_emoji = "🟢" if fix.get('effort') == 'low' else "🟡" if fix.get('effort') == 'medium' else "🔴"
                     st.write(f"{impact_emoji} **{fix.get('fix')}** (Impact: {fix.get('impact')}, Effort: {effort_emoji} {fix.get('effort')})")
-    # END OF NEW SECTION
     
     # Navigation
+    st.divider()
     c1, c2 = st.columns(2)
     with c1:
-        if st.button("Back to Keyword Selection (Step 2)"):
+        if st.button("Back to Keyword Selection (Step 2)", key="step3_back"):
             st.session_state.current_step = 2
             st.rerun()
     with c2:
-        if st.button("Proceed to Brief Generation (Step 4)"):
+        if st.button("Proceed to Brief Generation (Step 4)", type="primary", key="step3_next"):
             st.session_state.current_step = 4
             st.rerun()
+
 
 # ========== Step 4: Generate Content Brief ==========
 def show_step4():
@@ -788,7 +741,7 @@ def show_step4():
         height=420
     )
 
-    if st.button("Generate Content Brief", type="primary"):
+    if st.button("Generate Content Brief", type="primary", key="generate_brief"):
         if not st.session_state.selected_brief_keyword:
             st.error("Select a primary keyword in Step 2 to generate a brief.")
         else:
@@ -827,7 +780,8 @@ def show_step4():
         edited = st.text_area(
             "Edit Brief",
             value=st.session_state.generated_brief_content,
-            height=500
+            height=500,
+            key="edit_brief"
         )
         st.session_state.generated_brief_content = edited
 
@@ -841,20 +795,21 @@ def show_step4():
     # Navigation
     c1, c2, c3 = st.columns(3)
     with c1:
-        if st.button("Back to Audit Analysis (Step 3)"):
+        if st.button("Back to Audit Analysis (Step 3)", key="step4_back"):
             st.session_state.current_step = 3
             st.rerun()
     with c2:
         if st.session_state.generated_brief_content and not st.session_state.generated_brief_content.startswith("Error"):
-            if st.button("✨ Draft Content with Claude (Step 5)", type="primary"):
+            if st.button("✨ Draft Content with Claude (Step 5)", type="primary", key="step4_to_step5"):
                 st.session_state.current_step = 5
                 st.rerun()
     with c3:
-        if st.button("Reset All and Start Over"):
+        if st.button("Reset All and Start Over", key="step4_reset"):
             for key in list(st.session_state.keys()):
                 del st.session_state[key]
             init_state()
             st.rerun()
+
 
 def show_step5():
     """Step 5: Draft content using Claude API."""
@@ -863,7 +818,7 @@ def show_step5():
     # Check if we have a brief to work with
     if not st.session_state.generated_brief_content or st.session_state.generated_brief_content.startswith("Error"):
         st.error("No content brief available. Please complete Step 4 first.")
-        if st.button("Back to Step 4"):
+        if st.button("Back to Step 4", key="step5_back_to_4"):
             st.session_state.current_step = 4
             st.rerun()
         return
@@ -919,7 +874,7 @@ def show_step5():
     )
 
     # Generate button
-    if st.button("🚀 Generate Content Draft", type="primary"):
+    if st.button("🚀 Generate Content Draft", type="primary", key="generate_content_draft"):
         with st.spinner(f"Claude is drafting your content (~{word_count} words)..."):
             # Create the prompt for Claude
             additional_instr = f"\n\nADDITIONAL INSTRUCTIONS:\n{additional_instructions}" if additional_instructions else ""
@@ -1004,11 +959,11 @@ Write the article in Markdown format. Begin now:"""
     st.markdown("---")
     c1, c2 = st.columns(2)
     with c1:
-        if st.button("← Back to Content Brief (Step 4)"):
+        if st.button("← Back to Content Brief (Step 4)", key="step5_back"):
             st.session_state.current_step = 4
             st.rerun()
     with c2:
-        if st.button("Reset All and Start Over"):
+        if st.button("Reset All and Start Over", key="step5_reset"):
             for key in list(st.session_state.keys()):
                 del st.session_state[key]
             init_state()
