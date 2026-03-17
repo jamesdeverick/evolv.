@@ -610,6 +610,60 @@ Please return a concise analysis with:
             st.markdown(result)
             if not result.startswith("Error"):
                 st.session_state.current_step = 4
+# ADD THE REVISION TRACKER HERE (after LLM analysis):
+if st.session_state.llm_analysis_output and not st.session_state.llm_analysis_output.startswith("Error"):
+    if st.session_state.fetched_webpage_content and st.session_state.client_url:
+        st.divider()
+        st.subheader("📝 Content Revision Tracker")
+        st.info("Generate specific, tracked-changes style revisions based on the analysis")
+        
+        if st.button("Generate Revision Recommendations", type="secondary"):
+            from analysis.content_reviser import ContentReviser
+            
+            with st.spinner("Analyzing content and proposing specific revisions..."):
+                reviser = ContentReviser()
+                
+                # Gather gap data from previous steps
+                keyword_gaps = []
+                if st.session_state.analyzed_keywords_df is not None:
+                    selected_kws = st.session_state.analyzed_keywords_df[
+                        st.session_state.analyzed_keywords_df.get('Selected', False) == True
+                    ]
+                    keyword_gaps = selected_kws['Keyword'].tolist()[:20]
+                
+                entity_gaps = []
+                if st.session_state.competitor_analysis:
+                    comp = st.session_state.competitor_analysis
+                    if comp.get('common_entities'):
+                        for ent_type, entities in comp['common_entities'].items():
+                            entity_gaps.extend([e[0] for e in entities[:5]])
+                
+                eeat_reqs = None
+                if st.session_state.get('advanced_analysis'):
+                    eeat_reqs = st.session_state['advanced_analysis'].get('eeat_signals')
+                
+                # Generate revisions
+                revisions = reviser.analyze_and_propose_revisions(
+                    page_content=st.session_state.fetched_webpage_content,
+                    target_keyword=st.session_state.query_topic,
+                    keyword_gaps=keyword_gaps,
+                    entity_gaps=entity_gaps,
+                    competitor_analysis=st.session_state.competitor_analysis,
+                    eeat_requirements=eeat_reqs,
+                    url=st.session_state.client_url
+                )
+                
+                st.session_state.content_revisions = revisions
+        
+        # Display revisions (same as before)
+        if st.session_state.get('content_revisions'):
+            # ... rest of display code ...
+
+# THEN the navigation section:
+c1, c2 = st.columns(2)
+with c1:
+    if st.button("Back to Keyword Selection (Step 2)"):
+        ...
     
     # ADD THIS SECTION - Wireframe Generator
     if st.session_state.client_url and st.session_state.fetched_webpage_content:
