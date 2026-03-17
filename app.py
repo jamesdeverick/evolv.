@@ -612,10 +612,11 @@ Please return a concise analysis with:
         with st.spinner(f"Sending content to {llm_client.model} for analysis..."):
             result = llm_client.complete(review_prompt, temperature=0.7, max_tokens=2000)
             st.session_state.llm_analysis_output = result
-            st.subheader("💡 LLM's Analysis")
-            st.markdown(result)
-            if not result.startswith("Error"):
-                st.session_state.current_step = 4
+    
+    # Display LLM analysis if available
+    if st.session_state.llm_analysis_output:
+        st.subheader("💡 LLM's Analysis")
+        st.markdown(st.session_state.llm_analysis_output)
     
     # Content Revision Tracker Section
     if st.session_state.llm_analysis_output and not st.session_state.llm_analysis_output.startswith("Error"):
