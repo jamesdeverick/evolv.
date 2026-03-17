@@ -78,30 +78,86 @@ Identify 5-10 specific sections of the current content that need revision. For e
 - Do NOT suggest deleting large sections - only rewrites/additions
 - Prioritize changes that have highest SEO/LLM impact
 
-Return ONLY valid JSON (no markdown, no preamble):
+**CRITICAL JSON FORMATTING:**
+- Return ONLY valid JSON - no markdown, no explanation, no preamble
+- Do NOT use triple backticks or code fences
+- Ensure all strings are properly escaped (use \\" for quotes inside strings)
+- No trailing commas
+- change_type must be one of: keyword_insertion, entity_addition, eeat_strengthening, clarity_improvement
+- priority must be one of: high, medium, low
+
+Return this exact JSON structure:
 {{
   "revisions": [
     {{
       "section_name": "Introduction paragraph",
-      "original_text": "Exact quote from current content (1-3 sentences)",
-      "suggested_text": "Improved version with keywords/entities woven in naturally",
-      "reason": "Specific reason - e.g., 'Missing target keyword and AWS entity mention, weak LLM signal'",
+      "original_text": "Exact quote from current content",
+      "suggested_text": "Improved version with keywords woven in naturally",
+      "reason": "Specific reason explaining SEO/LLM benefit",
       "priority": "high",
-      "change_type": "keyword_insertion" | "entity_addition" | "eeat_strengthening" | "clarity_improvement"
+      "change_type": "keyword_insertion"
     }}
   ],
   "overall_assessment": "Brief summary of content gaps",
-  "quick_wins": ["List 2-3 easiest high-impact changes"]
+  "quick_wins": ["Change 1 description", "Change 2 description"]
 }}
 """
         
         try:
             result = self.llm.complete(prompt, temperature=0.3, max_tokens=2500)
             
-            # Parse JSON
+            # Parse JSON with better error handling
             import json
-            clean = re.sub(r'```json\s*|\s*```', '', result.strip())
-            revisions = json.loads(clean)
+            
+            # Clean the response
+            clean = result.strip()
+            
+            # Remove markdown code fences
+            clean = re.sub(r'```json\s*', '', clean)
+            clean = re.sub(r'\s*```', '', clean)
+            
+            # Remove any leading/trailing text before/after JSON
+            # Find first { and last }
+            start = clean.find('{')
+            end = clean.rfind('}')
+            
+            if start == -1 or end == -1:
+                print(f"No JSON found in LLM response")
+                print(f"LLM Response: {result[:500]}")
+                return {
+                    "error": "LLM did not return JSON. Response started with: " + result[:100],
+                    "revisions": [],
+                    "overall_assessment": "Unable to parse LLM response",
+                    "quick_wins": []
+                }
+            
+            clean = clean[start:end+1]
+            
+            # Try to parse
+            try:
+                revisions = json.loads(clean)
+            except json.JSONDecodeError as e:
+                print(f"JSON Parse Error: {e}")
+                print(f"Attempted to parse: {clean[:500]}")
+                return {
+                    "error": f"JSON parsing failed at position {e.pos}: {e.msg}. Check LLM response format.",
+                    "revisions": [],
+                    "overall_assessment": "Unable to parse LLM response - invalid JSON format",
+                    "quick_wins": [],
+                    "debug_response": clean[:1000]
+                }
+            
+            # Validate structure
+            if not isinstance(revisions, dict):
+                return {
+                    "error": "LLM returned invalid structure (not a dictionary)",
+                    "revisions": [],
+                    "overall_assessment": "Unable to generate revisions",
+                    "quick_wins": []
+                }
+            
+            if 'revisions' not in revisions:
+                revisions['revisions'] = []
             
             # Add metadata
             revisions['url'] = url
@@ -112,10 +168,12 @@ Return ONLY valid JSON (no markdown, no preamble):
             
         except Exception as e:
             print(f"Revision analysis error: {e}")
+            import traceback
+            traceback.print_exc()
             return {
-                "error": str(e),
+                "error": f"Unexpected error: {str(e)}",
                 "revisions": [],
-                "overall_assessment": "Unable to generate revisions",
+                "overall_assessment": "Unable to generate revisions due to error",
                 "quick_wins": []
             }
     
