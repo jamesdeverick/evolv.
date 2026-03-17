@@ -657,7 +657,7 @@ Please return a concise analysis with:
                         keyword_gaps=keyword_gaps,
                         entity_gaps=entity_gaps,
                         competitor_analysis=st.session_state.competitor_analysis,
-                        eeat_requirement=eeat_reqs,
+                        eeat_requirements=eeat_reqs,
                         url=st.session_state.client_url
                     )
                     
