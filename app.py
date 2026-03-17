@@ -617,6 +617,154 @@ Please return a concise analysis with:
             if not result.startswith("Error"):
                 st.session_state.current_step = 4
     
+    # Content Revision Tracker Section
+    if st.session_state.llm_analysis_output and not st.session_state.llm_analysis_output.startswith("Error"):
+        if st.session_state.fetched_webpage_content and st.session_state.client_url:
+            st.divider()
+            st.subheader("📝 Content Revision Tracker")
+            st.info("Generate specific, tracked-changes style revisions based on the analysis")
+            
+            if st.button("Generate Revision Recommendations", type="secondary", key="generate_revisions"):
+                from analysis.content_reviser import ContentReviser
+                
+                with st.spinner("Analyzing content and proposing specific revisions..."):
+                    reviser = ContentReviser()
+                    
+                    # Gather gap data from previous steps
+                    keyword_gaps = []
+                    if st.session_state.analyzed_keywords_df is not None:
+                        selected_kws = st.session_state.analyzed_keywords_df[
+                            st.session_state.analyzed_keywords_df.get('Selected', False) == True
+                        ]
+                        keyword_gaps = selected_kws['Keyword'].tolist()[:20]
+                    
+                    entity_gaps = []
+                    if st.session_state.competitor_analysis:
+                        comp = st.session_state.competitor_analysis
+                        if comp.get('common_entities'):
+                            for ent_type, entities in comp['common_entities'].items():
+                                entity_gaps.extend([e[0] for e in entities[:5]])
+                    
+                    eeat_reqs = None
+                    if st.session_state.get('advanced_analysis'):
+                        eeat_reqs = st.session_state['advanced_analysis'].get('eeat_signals')
+                    
+                    # Generate revisions
+                    revisions = reviser.analyze_and_propose_revisions(
+                        page_content=st.session_state.fetched_webpage_content,
+                        target_keyword=st.session_state.query_topic,
+                        keyword_gaps=keyword_gaps,
+                        entity_gaps=entity_gaps,
+                        competitor_analysis=st.session_state.competitor_analysis,
+                        eeat_requirement=eeat_reqs,
+                        url=st.session_state.client_url
+                    )
+                    
+                    st.session_state.content_revisions = revisions
+            
+            # Display revisions
+            if st.session_state.get('content_revisions'):
+                revisions = st.session_state.content_revisions
+                
+                if revisions.get('error'):
+                    st.error(f"Could not generate revisions: {revisions['error']}")
+                else:
+                    # Summary metrics
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("Total Changes", revisions.get('total_revisions', 0))
+                    with col2:
+                        high_priority = sum(1 for r in revisions.get('revisions', []) if r.get('priority') == 'high')
+                        st.metric("High Priority", high_priority)
+                    with col3:
+                        st.metric("Target Keyword", revisions.get('target_keyword', 'N/A'))
+                    
+                    # Overall assessment
+                    if revisions.get('overall_assessment'):
+                        st.markdown(f"**Assessment:** {revisions['overall_assessment']}")
+                    
+                    # Quick wins
+                    if revisions.get('quick_wins'):
+                        st.success("**🎯 Quick Wins:**")
+                        for win in revisions['quick_wins']:
+                            st.write(f"✓ {win}")
+                    
+                    st.divider()
+                    
+                    # Show each revision
+                    for i, rev in enumerate(revisions.get('revisions', []), 1):
+                        priority_emoji = "🔥" if rev['priority'] == 'high' else "⚡" if rev['priority'] == 'medium' else "💡"
+                        priority_color = "red" if rev['priority'] == 'high' else "orange" if rev['priority'] == 'medium' else "blue"
+                        
+                        with st.expander(
+                            f"{priority_emoji} **Change #{i}: {rev.get('section_name', 'Unnamed')}** ({rev.get('priority', 'medium').upper()})",
+                            expanded=(i <= 3)  # Expand first 3
+                        ):
+                            # Priority badge
+                            st.markdown(f"**Priority:** :{priority_color}[{rev.get('priority', 'medium').upper()}]")
+                            st.markdown(f"**Type:** {rev.get('change_type', 'general').replace('_', ' ').title()}")
+                            
+                            # Original text
+                            st.markdown("**ORIGINAL:**")
+                            st.text_area(
+                                "Original",
+                                value=rev.get('original_text', ''),
+                                height=100,
+                                disabled=True,
+                                key=f"orig_{i}",
+                                label_visibility="collapsed"
+                            )
+                            
+                            # Suggested text
+                            st.markdown("**SUGGESTED:**")
+                            st.text_area(
+                                "Suggested",
+                                value=rev.get('suggested_text', ''),
+                                height=120,
+                                key=f"sugg_{i}",
+                                label_visibility="collapsed"
+                            )
+                            
+                            # Reason
+                            st.info(f"**Reason:** {rev.get('reason', 'Not specified')}")
+                            
+                            # Accept/Reject buttons (for future enhancement)
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                if st.button("✅ Accept", key=f"accept_{i}", use_container_width=True):
+                                    st.success("Change accepted")
+                            with col2:
+                                if st.button("❌ Reject", key=f"reject_{i}", use_container_width=True):
+                                    st.warning("Change rejected")
+                    
+                    # Export options
+                    st.divider()
+                    st.subheader("Export Revisions")
+                    
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        # Export as markdown
+                        from analysis.content_reviser import ContentReviser
+                        reviser = ContentReviser()
+                        md_export = reviser.export_revisions_markdown(revisions)
+                        
+                        st.download_button(
+                            "📄 Download as Markdown",
+                            data=md_export,
+                            file_name=f"content_revisions_{revisions.get('target_keyword', 'page').replace(' ', '_')}.md",
+                            mime="text/markdown",
+                            use_container_width=True
+                        )
+                    
+                    with col2:
+                        # Copy to clipboard helper
+                        if st.button("📋 Copy Summary", use_container_width=True, key="copy_revisions_summary"):
+                            summary = f"Content Revisions for {revisions.get('url', 'page')}\n"
+                            summary += f"Total changes: {revisions.get('total_revisions', 0)}\n"
+                            summary += f"Assessment: {revisions.get('overall_assessment', 'N/A')}"
+                            st.code(summary)
+    
     # Wireframe Generator Section
     if st.session_state.client_url and st.session_state.fetched_webpage_content:
         st.divider()
