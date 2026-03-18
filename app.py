@@ -894,6 +894,19 @@ def show_step4():
         if not st.session_state.selected_brief_keyword:
             st.error("Select a primary keyword in Step 2 to generate a brief.")
         else:
+            # DEBUG: Check if revisions exist
+            st.write("---")
+            st.write("**🔍 DEBUG: Checking for revision data...**")
+            has_revisions = st.session_state.get('content_revisions') is not None
+            if has_revisions:
+                rev_count = st.session_state.content_revisions.get('total_revisions', 0)
+                st.success(f"✅ FOUND revision data: {rev_count} changes will be included in brief")
+                st.write("Revision details:", st.session_state.content_revisions.get('overall_assessment', 'N/A'))
+            else:
+                st.error("❌ NO revision data found - brief will NOT include revision insights")
+                st.write("Did you run 'Generate Revision Recommendations' in Step 3?")
+            st.write("---")
+            
             with st.spinner(f"Generating content brief with {llm_client.model}..."):
                 st.session_state.generated_brief_content = brief_creator.create_brief(
                     keyword=st.session_state.selected_brief_keyword,
