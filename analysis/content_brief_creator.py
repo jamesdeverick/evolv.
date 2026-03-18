@@ -48,7 +48,8 @@ class ContentBriefCreator:
         tone_guidelines: str = "",
         competitor_analysis: Optional[Dict[str, Any]] = None,
         advanced_analysis: Optional[Dict[str, Any]] = None,
-        page_type: str = "blog_post"
+        page_type: str = "blog_post",
+        content_revisions: Optional[Dict[str, Any]] = None
     ) -> str:
         """
         Create a comprehensive content brief.
@@ -100,6 +101,11 @@ class ContentBriefCreator:
         entity_guidance = ""
         if competitor_analysis and self.nlp_available:
             entity_guidance = self._build_entity_guidance(competitor_analysis)
+
+        # Build revision insights section
+        revision_insights = ""
+        if content_revisions and not content_revisions.get('error'):
+            revision_insights = self._build_revision_insights(content_revisions)
 
         # Build tone header with strict guidelines
         strict_tov = (tone_guidelines or "").strip()
@@ -160,6 +166,14 @@ class ContentBriefCreator:
             prompt_lines.extend([
                 "**🤖 Generative AI Optimization Guidance:**",
                 entity_guidance,
+                ""
+            ])
+
+        # Add revision insights if available
+        if revision_insights:
+            prompt_lines.extend([
+                "**📝 Content Revision Insights (From Existing Page Analysis):**",
+                revision_insights,
                 ""
             ])
 
@@ -479,3 +493,69 @@ class ContentBriefCreator:
             )
 
         return "\n".join(guidance_lines) if guidance_lines else ""
+
+    def _build_revision_insights(self, content_revisions: Dict[str, Any]) -> str:
+        """
+        Build revision insights section from tracked changes analysis.
+
+        Args:
+            content_revisions: Content revision data from ContentReviser
+
+        Returns:
+            Markdown formatted revision insights string
+        """
+        insights_lines = []
+
+        # Overall assessment
+        if content_revisions.get('overall_assessment'):
+            insights_lines.append(f"\n**Overall Assessment:** {content_revisions['overall_assessment']}")
+
+        # Quick wins
+        if content_revisions.get('quick_wins'):
+            insights_lines.append("\n**Quick Wins (High Impact, Easy Implementation):**")
+            for win in content_revisions['quick_wins']:
+                insights_lines.append(f"- {win}")
+
+        # Priority changes breakdown
+        revisions = content_revisions.get('revisions', [])
+        if revisions:
+            high_priority = [r for r in revisions if r.get('priority') == 'high']
+            medium_priority = [r for r in revisions if r.get('priority') == 'medium']
+
+            if high_priority:
+                insights_lines.append("\n**High Priority Changes Identified:**")
+                for rev in high_priority[:5]:  # Top 5 high priority
+                    insights_lines.append(
+                        f"- **{rev.get('section_name', 'Unnamed')}:** {rev.get('reason', 'No reason provided')}"
+                    )
+
+            if medium_priority:
+                insights_lines.append("\n**Medium Priority Improvements:**")
+                for rev in medium_priority[:3]:  # Top 3 medium priority
+                    insights_lines.append(
+                        f"- {rev.get('section_name', 'Unnamed')}: {rev.get('reason', 'No reason provided')}"
+                    )
+
+        # Key gaps summary
+        if revisions:
+            # Count change types
+            keyword_changes = sum(1 for r in revisions if r.get('change_type') == 'keyword_insertion')
+            entity_changes = sum(1 for r in revisions if r.get('change_type') == 'entity_addition')
+            eeat_changes = sum(1 for r in revisions if r.get('change_type') == 'eeat_strengthening')
+
+            gap_summary = []
+            if keyword_changes > 0:
+                gap_summary.append(f"{keyword_changes} keyword gaps")
+            if entity_changes > 0:
+                gap_summary.append(f"{entity_changes} missing entities")
+            if eeat_changes > 0:
+                gap_summary.append(f"{eeat_changes} E-E-A-T weaknesses")
+
+            if gap_summary:
+                insights_lines.append(f"\n**Gap Summary:** {', '.join(gap_summary)} identified")
+
+        insights_lines.append(
+            "\n_The content outline should address these gaps and incorporate the suggested improvements._"
+        )
+
+        return "\n".join(insights_lines) if insights_lines else ""
