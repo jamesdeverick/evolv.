@@ -252,7 +252,7 @@ class ContentBriefCreator:
         additions = []
         
         # E-E-A-T Requirements
-        if adv.get('eeat_signals') and not adv['eeat_signals'].get('error'):
+        if adv and adv.get('eeat_signals') and not adv['eeat_signals'].get('error'):
             eeat = adv['eeat_signals']
             additions.append("\n\n---\n\n## 🏆 E-E-A-T Requirements (CRITICAL)\n")
             
@@ -282,7 +282,7 @@ class ContentBriefCreator:
                     additions.append(f"**{action}**\n")
         
         # Featured Snippet Opportunities
-        if adv.get('featured_snippets') and not adv['featured_snippets'].get('error'):
+        if adv and adv.get('featured_snippets') and not adv['featured_snippets'].get('error'):
             snippets = adv['featured_snippets']
             high_opps = [o for o in snippets.get('high_opportunity_queries', []) 
                         if o.get('win_probability') in ['High', 'Medium']][:4]
@@ -303,7 +303,7 @@ class ContentBriefCreator:
                     additions.append(f"- {win}\n")
         
         # Critical Content Gaps
-        if adv.get('content_gaps') and not adv['content_gaps'].get('error'):
+        if adv and adv.get('content_gaps') and not adv['content_gaps'].get('error'):
             gaps = adv['content_gaps']
             critical = [g for g in gaps.get('critical_gaps', []) if g.get('priority') in ['High', 'Medium']][:6]
             
@@ -332,7 +332,7 @@ class ContentBriefCreator:
                     additions.append(f"- 💎 {opp}\n")
         
         # User Intent Deep Dive
-        if adv.get('search_intent') and not adv['search_intent'].get('error'):
+        if adv and adv.get('search_intent') and not adv['search_intent'].get('error'):
             intent = adv['search_intent']
             additions.append("\n\n## 🎯 User Intent & Content Expectations\n")
             
@@ -357,7 +357,7 @@ class ContentBriefCreator:
                 additions.append(f"\n**User success criteria:** {intent.get('success_criteria')}\n")
         
         # Topical Authority
-        if adv.get('topical_authority') and not adv['topical_authority'].get('error'):
+        if adv and adv.get('topical_authority') and not adv['topical_authority'].get('error'):
             ta = adv['topical_authority']
             
             if ta.get('authority_score'):
