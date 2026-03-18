@@ -102,10 +102,7 @@ class ContentBriefCreator:
         if competitor_analysis and self.nlp_available:
             entity_guidance = self._build_entity_guidance(competitor_analysis)
 
-        # Build revision insights section
-        revision_insights = ""
-        if content_revisions and not content_revisions.get('error'):
-            revision_insights = self._build_revision_insights(content_revisions)
+        # Note: Revision insights are handled in _append_advanced_analysis
 
         # Build tone header with strict guidelines
         strict_tov = (tone_guidelines or "").strip()
@@ -169,13 +166,8 @@ class ContentBriefCreator:
                 ""
             ])
 
-        # Add revision insights if available
-        if revision_insights:
-            prompt_lines.extend([
-                "**📝 Content Revision Insights (From Existing Page Analysis):**",
-                revision_insights,
-                ""
-            ])
+        # Note: Revision insights are appended after brief generation
+        # in _append_advanced_analysis to ensure they appear in final output
 
         prompt_lines.extend([
             "**Return the entire brief in Markdown.**",
@@ -234,22 +226,28 @@ class ContentBriefCreator:
         if not clean.strip():
             return "No valid response from LLM for content brief creation."
 
-        # ADD ADVANCED ANALYSIS SECTIONS (NEW)
-        if advanced_analysis:
-            clean = self._append_advanced_analysis(clean, advanced_analysis)
+        # ADD ADVANCED ANALYSIS SECTIONS AND REVISION INSIGHTS
+        if advanced_analysis or content_revisions:
+            clean = self._append_advanced_analysis(clean, advanced_analysis, content_revisions)
 
         return clean
 
-    def _append_advanced_analysis(self, brief: str, adv: Dict[str, Any]) -> str:
+    def _append_advanced_analysis(
+        self, 
+        brief: str, 
+        adv: Optional[Dict[str, Any]], 
+        content_revisions: Optional[Dict[str, Any]] = None
+    ) -> str:
         """
-        Append advanced analysis sections to the content brief.
+        Append advanced analysis sections and revision insights to the content brief.
         
         Args:
             brief: Existing brief content
             adv: Advanced analysis dictionary
+            content_revisions: Content revision tracker data
             
         Returns:
-            Enhanced brief with advanced sections
+            Enhanced brief with advanced sections and revision insights
         """
         additions = []
         
@@ -379,6 +377,61 @@ class ContentBriefCreator:
                 additions.append("\n### Entities/Concepts to Mention:\n")
                 for gap in ta['semantic_gaps'][:6]:
                     additions.append(f"- {gap}\n")
+        
+        # Add Content Revision Insights
+        if content_revisions and not content_revisions.get('error'):
+            print("[DEBUG] Adding revision insights to brief...")
+            additions.append("\n\n---\n\n## 📝 Content Revision Insights (From Existing Page Analysis)\n")
+            
+            # Overall assessment
+            if content_revisions.get('overall_assessment'):
+                additions.append(f"\n**Overall Assessment:** {content_revisions['overall_assessment']}\n")
+            
+            # Quick wins
+            if content_revisions.get('quick_wins'):
+                additions.append("\n### 🎯 Quick Wins (High Impact, Easy Implementation)\n")
+                for win in content_revisions['quick_wins']:
+                    additions.append(f"- {win}\n")
+            
+            # High priority changes
+            revisions = content_revisions.get('revisions', [])
+            high_priority = [r for r in revisions if r.get('priority') == 'high']
+            
+            if high_priority:
+                additions.append("\n### 🔥 High Priority Changes Identified\n")
+                additions.append("_These changes will have the biggest impact on SEO/LLM visibility:_\n\n")
+                for rev in high_priority[:5]:
+                    additions.append(f"**{rev.get('section_name', 'Unnamed')}:**\n")
+                    additions.append(f"- **Original:** {rev.get('original_text', '')[:100]}...\n")
+                    additions.append(f"- **Suggested:** {rev.get('suggested_text', '')[:100]}...\n")
+                    additions.append(f"- **Reason:** {rev.get('reason', 'Not specified')}\n\n")
+            
+            # Medium priority
+            medium_priority = [r for r in revisions if r.get('priority') == 'medium']
+            if medium_priority:
+                additions.append("\n### ⚡ Medium Priority Improvements\n")
+                for rev in medium_priority[:3]:
+                    additions.append(f"- **{rev.get('section_name')}:** {rev.get('reason')}\n")
+            
+            # Gap summary
+            if revisions:
+                keyword_changes = sum(1 for r in revisions if r.get('change_type') == 'keyword_insertion')
+                entity_changes = sum(1 for r in revisions if r.get('change_type') == 'entity_addition')
+                eeat_changes = sum(1 for r in revisions if r.get('change_type') == 'eeat_strengthening')
+                
+                gap_parts = []
+                if keyword_changes > 0:
+                    gap_parts.append(f"{keyword_changes} keyword gaps")
+                if entity_changes > 0:
+                    gap_parts.append(f"{entity_changes} missing entities")
+                if eeat_changes > 0:
+                    gap_parts.append(f"{eeat_changes} E-E-A-T weaknesses")
+                
+                if gap_parts:
+                    additions.append(f"\n**Gap Summary:** {', '.join(gap_parts)} identified\n")
+            
+            additions.append("\n_The content outline above should address these gaps and incorporate the suggested improvements._\n")
+            print(f"[DEBUG] Revision insights section added: {len(''.join(additions[-20:]))} characters")
         
         # Append all additions to the brief
         if additions:
