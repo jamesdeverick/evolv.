@@ -227,8 +227,10 @@ class ContentBriefCreator:
             return "No valid response from LLM for content brief creation."
 
         # Store core brief BEFORE advanced sections are appended
-        # This is what gets sent to Opal — clean brief without editor-only analysis
+        # Use session state via a module-level flag so it survives Streamlit reruns
         self._core_brief_markdown = clean
+        # Also store in a class-level variable as backup
+        ContentBriefCreator._last_core_brief = clean
 
         # ADD ADVANCED ANALYSIS SECTIONS AND REVISION INSIGHTS
         if advanced_analysis or content_revisions:
@@ -651,7 +653,12 @@ class ContentBriefCreator:
         # 1. Try H1 markdown heading
         h1_match = re.search(r'^#\s+(.+)$', brief_markdown, re.MULTILINE)
         if h1_match:
-            title = h1_match.group(1).strip()
+            candidate = h1_match.group(1).strip()
+            # Strip common LLM prefixes/suffixes
+            candidate = re.sub(r'^Title:\s*', '', candidate, flags=re.IGNORECASE)
+            candidate = re.sub(r'\s*\(SEO Optimized\)\s*$', '', candidate, flags=re.IGNORECASE)
+            candidate = re.sub(r'\s*\(SEO-Optimized\)\s*$', '', candidate, flags=re.IGNORECASE)
+            title = candidate.strip()
         else:
             # 2. Try line immediately after "Content Title" or "1. Content Title" label
             title_section_match = re.search(
@@ -705,22 +712,15 @@ class ContentBriefCreator:
                     "change_type": rev.get('change_type', '')
                 })
 
-        # Normalise page_type — if still default and we have a URL, infer from URL path
-        if page_type == "blog_post" and client_url:
-            url_lower = client_url.lower()
-            if "/solutions/" in url_lower:
-                page_type = "solution_page"
-            elif "/products/" in url_lower or "/product/" in url_lower:
-                page_type = "product_page"
-            elif "/topics/" in url_lower or "/resources/" in url_lower:
-                page_type = "topic_page"
-            elif "/blog/" in url_lower or "/c/" in url_lower:
-                page_type = "blog_post"
-            # else leave as blog_post
+        # page_type is passed in directly from UI selection — no URL inference
 
         # Use core brief only (without advanced analysis sections) for Opal payload
-        # Fall back to full brief_markdown if core wasn't stored (e.g. called independently)
-        opal_brief = getattr(self, '_core_brief_markdown', None) or brief_markdown
+        # Falls back through: instance var -> class-level var -> full brief_markdown passed in
+        opal_brief = (
+            getattr(self, '_core_brief_markdown', None)
+            or getattr(ContentBriefCreator, '_last_core_brief', None)
+            or brief_markdown
+        )
 
         # Build the gap record
         gap_record = {
