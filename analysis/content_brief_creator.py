@@ -226,6 +226,10 @@ class ContentBriefCreator:
         if not clean.strip():
             return "No valid response from LLM for content brief creation."
 
+        # Store core brief BEFORE advanced sections are appended
+        # This is what gets sent to Opal — clean brief without editor-only analysis
+        self._core_brief_markdown = clean
+
         # ADD ADVANCED ANALYSIS SECTIONS AND REVISION INSIGHTS
         if advanced_analysis or content_revisions:
             clean = self._append_advanced_analysis(clean, advanced_analysis, content_revisions)
@@ -641,25 +645,36 @@ class ContentBriefCreator:
         # Determine action type
         action_type = "optimise_existing_page" if client_url else "create_new_page"
 
-        # Extract title from brief — look for H1 first, then the line after
-        # "Content Title" heading, then fall back to keyword
-        title = keyword  # default
-        # Try H1
+        # Extract title from brief — try multiple patterns in order of reliability
+        title = keyword  # default fallback
+
+        # 1. Try H1 markdown heading
         h1_match = re.search(r'^#\s+(.+)$', brief_markdown, re.MULTILINE)
         if h1_match:
             title = h1_match.group(1).strip()
         else:
-            # Try line immediately after "Content Title" label
+            # 2. Try line immediately after "Content Title" or "1. Content Title" label
             title_section_match = re.search(
-                r'Content Title[^\n]*\n+[-*]?\s*(.+)',
+                r'(?:^1\.\s*)?Content Title[^\n]*\n+[-*]?\s*(.+)',
                 brief_markdown,
-                re.IGNORECASE
+                re.IGNORECASE | re.MULTILINE
             )
             if title_section_match:
-                candidate = title_section_match.group(1).strip().lstrip('#').strip()
-                # Reject if it looks like a label rather than a title
+                candidate = title_section_match.group(1).strip().lstrip('#-* ').strip()
                 if candidate and not candidate.endswith(':') and len(candidate) > 10:
                     title = candidate
+
+            # 3. Try "Title:" line in On-page SEO elements section
+            if title == keyword:
+                seo_title_match = re.search(
+                    r'[-*]\s*Title:\s*(.+)',
+                    brief_markdown,
+                    re.IGNORECASE
+                )
+                if seo_title_match:
+                    candidate = seo_title_match.group(1).strip()
+                    if candidate and not candidate.endswith(':') and len(candidate) > 10:
+                        title = candidate
 
         # Extract LLM anchor sentence if present
         anchor_match = re.search(
@@ -695,13 +710,17 @@ class ContentBriefCreator:
             url_lower = client_url.lower()
             if "/solutions/" in url_lower:
                 page_type = "solution_page"
-            elif "/products/" in url_lower:
+            elif "/products/" in url_lower or "/product/" in url_lower:
                 page_type = "product_page"
             elif "/topics/" in url_lower or "/resources/" in url_lower:
                 page_type = "topic_page"
             elif "/blog/" in url_lower or "/c/" in url_lower:
                 page_type = "blog_post"
             # else leave as blog_post
+
+        # Use core brief only (without advanced analysis sections) for Opal payload
+        # Fall back to full brief_markdown if core wasn't stored (e.g. called independently)
+        opal_brief = getattr(self, '_core_brief_markdown', None) or brief_markdown
 
         # Build the gap record
         gap_record = {
@@ -715,7 +734,7 @@ class ContentBriefCreator:
             "meta_description": meta_description,
             "llm_anchor_sentence": llm_anchor_sentence,
             "recommended_revisions": recommended_revisions,
-            "brief_markdown": brief_markdown
+            "brief_markdown": opal_brief
         }
 
         return gap_record
