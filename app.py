@@ -948,12 +948,105 @@ def show_step4():
         )
         st.session_state.generated_brief_content = edited
 
+        # Download button
         st.download_button(
-            "Download Brief (Markdown)",
+            "⬇ Download Brief (Markdown)",
             data=edited.encode("utf-8"),
             file_name=f"content_brief_{datetime.now().strftime('%Y%m%d_%H%M')}.md",
             mime="text/markdown"
         )
+
+        # ========== Opal Webhook Section ==========
+        st.divider()
+        st.subheader("🚀 Send to Optimizely Opal")
+        st.info("POST this brief directly to the Opal workflow agent via webhook.")
+
+        # Get webhook config from env or UI
+        opal_webhook_url = os.environ.get("OPAL_WEBHOOK_URL", "")
+        opal_bearer_token = os.environ.get("OPAL_BEARER_TOKEN", "")
+
+        with st.expander("⚙️ Opal Webhook Configuration", expanded=not bool(opal_webhook_url)):
+            webhook_url_input = st.text_input(
+                "Opal Webhook URL",
+                value=opal_webhook_url,
+                placeholder="https://app.optimizely.com/webhooks/...",
+                help="The Opal-generated webhook URL. Set OPAL_WEBHOOK_URL env var to avoid entering this each time."
+            )
+            bearer_token_input = st.text_input(
+                "Bearer Token",
+                value=opal_bearer_token,
+                type="password",
+                help="Your secret auth token. Set OPAL_BEARER_TOKEN env var to avoid entering this each time."
+            )
+            auth_header_name_input = st.text_input(
+                "Auth Header Name",
+                value="Authorization",
+                help="Header name for the Bearer token (default: Authorization)"
+            )
+
+            # Use UI values if env vars not set
+            if webhook_url_input:
+                opal_webhook_url = webhook_url_input
+            if bearer_token_input:
+                opal_bearer_token = bearer_token_input
+
+        # JSON preview
+        with st.expander("👁 Preview JSON payload", expanded=False):
+            import json
+            gap_record = brief_creator.to_gap_record_json(
+                brief_markdown=st.session_state.generated_brief_content,
+                keyword=st.session_state.selected_brief_keyword or "",
+                client_url=st.session_state.client_url or "",
+                page_type=st.session_state.get('page_type', 'blog_post'),
+                related_keywords=st.session_state.related_keywords_for_brief,
+                content_revisions=st.session_state.get('content_revisions')
+            )
+            st.json(gap_record)
+
+            # Also offer JSON download
+            st.download_button(
+                "⬇ Download as JSON",
+                data=json.dumps(gap_record, indent=2, ensure_ascii=False).encode("utf-8"),
+                file_name=f"gap_record_{datetime.now().strftime('%Y%m%d_%H%M')}.json",
+                mime="application/json"
+            )
+
+        # Send button
+        col1, col2 = st.columns([1, 2])
+        with col1:
+            send_to_opal = st.button(
+                "📤 Send to Opal",
+                type="primary",
+                key="send_to_opal",
+                disabled=not bool(opal_webhook_url and opal_bearer_token)
+            )
+
+        with col2:
+            if not opal_webhook_url:
+                st.warning("Enter the Opal webhook URL above to enable sending.")
+            elif not opal_bearer_token:
+                st.warning("Enter the Bearer token above to enable sending.")
+
+        if send_to_opal:
+            with st.spinner("Sending to Opal..."):
+                result = brief_creator.post_to_opal(
+                    brief_markdown=st.session_state.generated_brief_content,
+                    keyword=st.session_state.selected_brief_keyword or "",
+                    client_url=st.session_state.client_url or "",
+                    webhook_url=opal_webhook_url,
+                    bearer_token=opal_bearer_token,
+                    auth_header_name=auth_header_name_input,
+                    page_type=st.session_state.get('page_type', 'blog_post'),
+                    related_keywords=st.session_state.related_keywords_for_brief,
+                    content_revisions=st.session_state.get('content_revisions')
+                )
+
+            if result.get("success"):
+                st.success(f"✅ Brief sent to Opal successfully (HTTP {result['status_code']})")
+            else:
+                st.error(f"❌ Failed to send to Opal (HTTP {result['status_code']})")
+                with st.expander("Response details"):
+                    st.code(result.get("response", "No response body"))
 
     # Navigation
     c1, c2, c3 = st.columns(3)
