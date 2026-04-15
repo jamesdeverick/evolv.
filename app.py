@@ -191,6 +191,7 @@ def init_state():
         "competitor_analysis": None,
         "keyword_clusters": {},
         "generated_brief_content": "",
+        "core_brief_content": "",
         "drafted_content": "",
     }
     for k, v in defaults.items():
@@ -926,6 +927,9 @@ def show_step4():
                 )
 
             if st.session_state.generated_brief_content and not st.session_state.generated_brief_content.startswith("Error"):
+                # Store core brief (pre-advanced-analysis) in session state for Opal payload
+                st.session_state.core_brief_content = getattr(brief_creator, '_core_brief_markdown', st.session_state.generated_brief_content)
+
                 # Enhance with page type requirements
                 st.session_state.generated_brief_content = PageTypeManager.enhance_brief_for_page_type(
                     st.session_state.generated_brief_content,
@@ -994,7 +998,7 @@ def show_step4():
         with st.expander("👁 Preview JSON payload", expanded=False):
             import json
             gap_record = brief_creator.to_gap_record_json(
-                brief_markdown=st.session_state.generated_brief_content,
+                brief_markdown=st.session_state.get('core_brief_content', st.session_state.generated_brief_content),
                 keyword=st.session_state.selected_brief_keyword or "",
                 client_url=st.session_state.client_url or "",
                 page_type=st.session_state.get('page_type', 'blog_post'),
@@ -1030,7 +1034,7 @@ def show_step4():
         if send_to_opal:
             with st.spinner("Sending to Opal..."):
                 result = brief_creator.post_to_opal(
-                    brief_markdown=st.session_state.generated_brief_content,
+                    brief_markdown=st.session_state.get('core_brief_content', st.session_state.generated_brief_content),
                     keyword=st.session_state.selected_brief_keyword or "",
                     client_url=st.session_state.client_url or "",
                     webhook_url=opal_webhook_url,
