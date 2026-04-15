@@ -641,9 +641,25 @@ class ContentBriefCreator:
         # Determine action type
         action_type = "optimise_existing_page" if client_url else "create_new_page"
 
-        # Extract title from brief (first H1 or bold title line)
-        title_match = re.search(r'^#\s+(.+)$|^\*\*(.+?)\*\*', brief_markdown, re.MULTILINE)
-        title = (title_match.group(1) or title_match.group(2)) if title_match else keyword
+        # Extract title from brief — look for H1 first, then the line after
+        # "Content Title" heading, then fall back to keyword
+        title = keyword  # default
+        # Try H1
+        h1_match = re.search(r'^#\s+(.+)$', brief_markdown, re.MULTILINE)
+        if h1_match:
+            title = h1_match.group(1).strip()
+        else:
+            # Try line immediately after "Content Title" label
+            title_section_match = re.search(
+                r'Content Title[^\n]*\n+[-*]?\s*(.+)',
+                brief_markdown,
+                re.IGNORECASE
+            )
+            if title_section_match:
+                candidate = title_section_match.group(1).strip().lstrip('#').strip()
+                # Reject if it looks like a label rather than a title
+                if candidate and not candidate.endswith(':') and len(candidate) > 10:
+                    title = candidate
 
         # Extract LLM anchor sentence if present
         anchor_match = re.search(
@@ -673,6 +689,19 @@ class ContentBriefCreator:
                     "priority": rev.get('priority', 'medium'),
                     "change_type": rev.get('change_type', '')
                 })
+
+        # Normalise page_type — if still default and we have a URL, infer from URL path
+        if page_type == "blog_post" and client_url:
+            url_lower = client_url.lower()
+            if "/solutions/" in url_lower:
+                page_type = "solution_page"
+            elif "/products/" in url_lower:
+                page_type = "product_page"
+            elif "/topics/" in url_lower or "/resources/" in url_lower:
+                page_type = "topic_page"
+            elif "/blog/" in url_lower or "/c/" in url_lower:
+                page_type = "blog_post"
+            # else leave as blog_post
 
         # Build the gap record
         gap_record = {
