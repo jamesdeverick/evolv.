@@ -228,7 +228,7 @@ IMPORTANT RULES:
         proof = parsed_audit.get("customer_proof_points", [])
         if proof:
             lines.extend([
-                "**REQUIRED CUSTOMER PROOF POINTS:**",
+                "**🚨 MANDATORY CUSTOMER PROOF POINTS (must be named in the brief, ideally in Section 4 or 12):**",
             ])
             for p in proof:
                 lines.append(f"  → {p}")
@@ -253,7 +253,7 @@ IMPORTANT RULES:
         structural = parsed_audit.get("required_structural_elements", [])
         if structural:
             lines.extend([
-                "**REQUIRED PAGE STRUCTURE ELEMENTS:**",
+                "**🚨 MANDATORY PAGE STRUCTURE ELEMENTS (must appear in Section 11 of brief AND be integrated into the outline):**",
             ])
             for elem in structural:
                 lines.append(f"  → {elem}")
@@ -283,7 +283,7 @@ IMPORTANT RULES:
         links = parsed_audit.get("required_internal_links", [])
         if links:
             lines.extend([
-                "**REQUIRED INTERNAL LINKS:**",
+                "**🚨 MANDATORY INTERNAL LINKS (must appear in Section 6 of brief):**",
             ])
             for link in links:
                 lines.append(f"  → {link}")
@@ -366,8 +366,8 @@ IMPORTANT RULES:
         parsed_audit: Dict[str, Any]
     ) -> Dict[str, Any]:
         """
-        Check whether the generated brief actually addresses the audit requirements.
-        Returns compliance report.
+        Comprehensive check of brief against ALL audit requirement types.
+        Returns detailed compliance report.
         """
         if not parsed_audit.get("has_audit"):
             return {"compliant": True, "message": "No audit to check against"}
@@ -378,38 +378,186 @@ IMPORTANT RULES:
             "citations_missing": [],
             "products_included": [],
             "products_missing": [],
+            "data_points_included": [],
+            "data_points_missing": [],
+            "structural_included": [],
+            "structural_missing": [],
+            "customer_proof_included": [],
+            "customer_proof_missing": [],
+            "internal_links_included": [],
+            "internal_links_missing": [],
+            "recommendations_included": [],
+            "recommendations_missing": [],
+            "gaps_addressed": [],
+            "gaps_still_open": [],
             "compliance_score": 0,
             "total_checks": 0,
-            "passed_checks": 0
+            "passed_checks": 0,
+            "category_scores": {}
         }
 
-        # Check citations
+        def fuzzy_match(text: str, target: str, min_terms: int = 2) -> bool:
+            """Check if key terms from target appear in text."""
+            # Extract meaningful terms (skip stopwords, short words)
+            stopwords = {'the', 'and', 'for', 'with', 'from', 'that', 'this', 
+                        'these', 'those', 'about', 'into', 'over', 'must', 'should'}
+            terms = [w.lower().strip('.,;:()[]"\'') 
+                     for w in target.split() 
+                     if len(w) > 3 and w.lower() not in stopwords]
+            if not terms:
+                return target.lower() in text
+            matches = sum(1 for t in terms if t in text)
+            return matches >= min(min_terms, len(terms))
+
+        # 1. Check citations (require 2+ capitalized terms match)
         for citation in parsed_audit.get("required_citations", []):
             report["total_checks"] += 1
-            # Extract key words from citation for fuzzy match
-            key_terms = [w for w in citation.split() if len(w) > 4 and w[0].isupper()]
-            if any(term.lower() in brief_lower for term in key_terms[:3]):
+            key_terms = [w for w in citation.split() 
+                        if len(w) > 3 and (w[0].isupper() or w.isdigit())]
+            matches = sum(1 for t in key_terms if t.lower() in brief_lower)
+            if matches >= 2 or (len(key_terms) == 1 and matches == 1):
                 report["citations_included"].append(citation)
                 report["passed_checks"] += 1
             else:
                 report["citations_missing"].append(citation)
 
-        # Check product mentions
+        # 2. Check product mentions (exact match)
         for product in parsed_audit.get("required_product_mentions", []):
             report["total_checks"] += 1
-            # Check for exact product name (case insensitive)
             if product.lower() in brief_lower:
                 report["products_included"].append(product)
                 report["passed_checks"] += 1
             else:
                 report["products_missing"].append(product)
 
+        # 3. Check data points (look for numbers/percentages)
+        for data_point in parsed_audit.get("required_data_points", []):
+            report["total_checks"] += 1
+            # Extract distinctive elements - numbers and key nouns
+            import re
+            numbers = re.findall(r'\d+(?:\.\d+)?%?', data_point)
+            key_terms = [w for w in data_point.split() 
+                        if len(w) > 5 and not w[0].isdigit()][:3]
+            
+            has_number = any(n in brief for n in numbers)
+            has_context = any(t.lower() in brief_lower for t in key_terms)
+            
+            if has_number and has_context:
+                report["data_points_included"].append(data_point)
+                report["passed_checks"] += 1
+            elif has_number or fuzzy_match(brief_lower, data_point, min_terms=3):
+                report["data_points_included"].append(data_point)
+                report["passed_checks"] += 1
+            else:
+                report["data_points_missing"].append(data_point)
+
+        # 4. Check structural elements (keywords like "Key Takeaways", "FAQ", "freshness")
+        structural_keywords = {
+            'key takeaways': ['key takeaway', 'takeaways box', 'takeaways section'],
+            'faq': ['faq', 'frequently asked', 'faqs'],
+            'freshness stamp': ['updated', 'last updated', 'freshness', 'refresh', 'date stamp'],
+            'schema': ['schema', 'json-ld', 'structured data'],
+            'cta': ['call-to-action', 'cta', 'call to action'],
+            'meta description': ['meta description', 'meta desc'],
+            'internal link': ['internal link', 'internal linking'],
+            'author': ['author bio', 'byline', 'author box'],
+            'callout': ['callout', 'call-out', 'highlight box'],
+        }
+        for element in parsed_audit.get("required_structural_elements", []):
+            report["total_checks"] += 1
+            element_lower = element.lower()
+            
+            # Direct match first
+            found = False
+            if fuzzy_match(brief_lower, element, min_terms=2):
+                found = True
+            else:
+                # Check keyword categories
+                for category, keywords in structural_keywords.items():
+                    if category in element_lower:
+                        if any(kw in brief_lower for kw in keywords):
+                            found = True
+                            break
+            
+            if found:
+                report["structural_included"].append(element)
+                report["passed_checks"] += 1
+            else:
+                report["structural_missing"].append(element)
+
+        # 5. Check customer proof points (name match)
+        for proof in parsed_audit.get("customer_proof_points", []):
+            report["total_checks"] += 1
+            # Extract likely proper nouns (capitalized words)
+            names = [w for w in proof.split() 
+                    if len(w) > 3 and w[0].isupper() 
+                    and w not in {'The', 'Their', 'This', 'That', 'From'}]
+            
+            if any(name.lower() in brief_lower for name in names):
+                report["customer_proof_included"].append(proof)
+                report["passed_checks"] += 1
+            else:
+                report["customer_proof_missing"].append(proof)
+
+        # 6. Check internal links (URL/path match)
+        for link in parsed_audit.get("required_internal_links", []):
+            report["total_checks"] += 1
+            # Look for URL paths or distinctive slug words
+            import re
+            paths = re.findall(r'/[a-z0-9\-/]+', link.lower())
+            
+            if paths and any(p in brief.lower() for p in paths if len(p) > 5):
+                report["internal_links_included"].append(link)
+                report["passed_checks"] += 1
+            elif fuzzy_match(brief_lower, link, min_terms=2):
+                report["internal_links_included"].append(link)
+                report["passed_checks"] += 1
+            else:
+                report["internal_links_missing"].append(link)
+
+        # 7. Check prioritized recommendations (fuzzy match)
+        for rec in parsed_audit.get("prioritized_recommendations", []):
+            report["total_checks"] += 1
+            rec_text = rec.get("recommendation", "") if isinstance(rec, dict) else str(rec)
+            
+            if fuzzy_match(brief_lower, rec_text, min_terms=3):
+                report["recommendations_included"].append(rec_text)
+                report["passed_checks"] += 1
+            else:
+                report["recommendations_missing"].append(rec_text)
+
+        # 8. Check critical gaps (fuzzy match - gap is "addressed" if brief mentions the topic)
+        for gap in parsed_audit.get("critical_gaps_to_fill", []):
+            report["total_checks"] += 1
+            if fuzzy_match(brief_lower, gap, min_terms=3):
+                report["gaps_addressed"].append(gap)
+                report["passed_checks"] += 1
+            else:
+                report["gaps_still_open"].append(gap)
+
+        # Calculate overall score
         if report["total_checks"] > 0:
             report["compliance_score"] = round(
                 (report["passed_checks"] / report["total_checks"]) * 100, 1
             )
         else:
             report["compliance_score"] = 100
+
+        # Category-level scores for insight
+        def cat_score(included, missing):
+            total = len(included) + len(missing)
+            return round((len(included) / total) * 100, 1) if total > 0 else None
+
+        report["category_scores"] = {
+            "citations": cat_score(report["citations_included"], report["citations_missing"]),
+            "products": cat_score(report["products_included"], report["products_missing"]),
+            "data_points": cat_score(report["data_points_included"], report["data_points_missing"]),
+            "structural": cat_score(report["structural_included"], report["structural_missing"]),
+            "customer_proof": cat_score(report["customer_proof_included"], report["customer_proof_missing"]),
+            "internal_links": cat_score(report["internal_links_included"], report["internal_links_missing"]),
+            "recommendations": cat_score(report["recommendations_included"], report["recommendations_missing"]),
+            "gaps": cat_score(report["gaps_addressed"], report["gaps_still_open"]),
+        }
 
         report["compliant"] = report["compliance_score"] >= 80
 
