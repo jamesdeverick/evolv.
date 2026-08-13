@@ -152,9 +152,33 @@ class ContentBriefCreator:
             "**Client Webpage Content (excerpt):**",
             (webpage_content[:8000] + "…") if len(webpage_content) > 8000 else (webpage_content or "[Not available]"),
             "",
-            "**SEO Audit Findings (raw uploaded report - see structured requirements above):**",
-            audit_findings or "[Not provided]",
-            "",
+        ])
+
+        # Avoid duplicating audit content in the prompt: when we have the
+        # structured requirements block, the raw audit is heavily truncated
+        # (context only, not for extraction) rather than sent in full - this
+        # was a major contributor to context overflow (audit block + full
+        # raw audit text + webpage content + LLM analysis was ~16.5K tokens
+        # before generation even started).
+        if audit_requirements_block:
+            raw_audit_excerpt = (
+                (audit_findings[:1500] + "… [truncated - full structured requirements above]")
+                if len(audit_findings or "") > 1500
+                else (audit_findings or "[Not provided]")
+            )
+            prompt_lines.extend([
+                "**SEO Audit Findings (excerpt - see structured MANDATORY requirements above for full detail):**",
+                raw_audit_excerpt,
+                "",
+            ])
+        else:
+            prompt_lines.extend([
+                "**SEO Audit Findings (uploaded report):**",
+                audit_findings or "[Not provided]",
+                "",
+            ])
+
+        prompt_lines.extend([
             "**LLM's Previous Audit Analysis (CRITICAL - USE THIS EXACT STRUCTURE):**",
             llm_analysis or "[No previous LLM analysis available]",
             "",
