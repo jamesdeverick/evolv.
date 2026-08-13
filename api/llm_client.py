@@ -36,11 +36,11 @@ except ImportError:
 # content + SERP data) will silently get truncated from the FRONT if this
 # isn't set high enough, which drops whatever was placed first in the prompt.
 #
-# Mistral 7B v0.3 supports up to 32768 tokens. 16384 gives generous headroom
-# for our current prompt sizes (audit block + 8000 char webpage excerpt +
-# audit findings + LLM analysis + instructions) while leaving room for
-# max_tokens output, without unnecessarily inflating VRAM usage.
-OLLAMA_DEFAULT_NUM_CTX = 16384
+# Mistral 7B v0.3 supports up to 32768 tokens. Set to the max here since
+# audit-heavy prompts (structured requirements block + raw audit text +
+# webpage content + LLM analysis + SERP data) can comfortably exceed 16K.
+# RTX 3090 has ample VRAM headroom for a 7B model even at full context.
+OLLAMA_DEFAULT_NUM_CTX = 32768
 
 
 class LLMClient:
