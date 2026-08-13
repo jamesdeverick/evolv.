@@ -29,23 +29,39 @@ except ImportError:
     ANTHROPIC_AVAILABLE = False
 
 
+# Default context window for Ollama models.
+# CRITICAL: Ollama does NOT use the model's max supported context by default -
+# it falls back to a small runtime default (often 2048-4096 tokens) unless
+# num_ctx is explicitly passed. Long prompts (audit requirements + webpage
+# content + SERP data) will silently get truncated from the FRONT if this
+# isn't set high enough, which drops whatever was placed first in the prompt.
+#
+# Mistral 7B v0.3 supports up to 32768 tokens. 16384 gives generous headroom
+# for our current prompt sizes (audit block + 8000 char webpage excerpt +
+# audit findings + LLM analysis + instructions) while leaving room for
+# max_tokens output, without unnecessarily inflating VRAM usage.
+OLLAMA_DEFAULT_NUM_CTX = 16384
+
+
 class LLMClient:
     """
     Unified LLM client that works with multiple providers.
     Automatically switches based on configuration.
     """
 
-    def __init__(self, provider: Optional[str] = None):
+    def __init__(self, provider: Optional[str] = None, num_ctx: Optional[int] = None):
         """
         Initialize LLM client.
 
         Args:
             provider: "ollama", "deepseek", "openai", or "anthropic". If None, uses DEFAULT_LLM_PROVIDER
+            num_ctx: Context window size for Ollama (in tokens). Defaults to OLLAMA_DEFAULT_NUM_CTX.
         """
         self.provider = provider or DEFAULT_LLM_PROVIDER
         self.available = False
         self.model = None
         self.api_base = None
+        self.num_ctx = num_ctx or OLLAMA_DEFAULT_NUM_CTX
 
         self._configure()
 
@@ -132,6 +148,7 @@ class LLMClient:
             "provider": self.provider,
             "model": self.model,
             "api_base": self.api_base,
+            "num_ctx": self.num_ctx if self.provider == "ollama" else None,
             "error": getattr(self, 'error', None)
         }
 
@@ -162,16 +179,32 @@ class LLMClient:
         except Exception as e:
             return f"Error during LLM completion: {e}"
 
+    def _estimate_tokens(self, text: str) -> int:
+        """Rough token estimate (chars / 4 is a reasonable approximation for English text)."""
+        return len(text) // 4
+
     def _complete_ollama(self, prompt: str, temperature: float, max_tokens: int) -> str:
         """Direct Ollama API call."""
         try:
+            # Warn (via print, visible in Streamlit logs) if prompt + max_tokens
+            # is close to or exceeds num_ctx - helps catch this class of bug early.
+            estimated_prompt_tokens = self._estimate_tokens(prompt)
+            total_needed = estimated_prompt_tokens + max_tokens
+            if total_needed > self.num_ctx:
+                print(
+                    f"[WARNING] Estimated prompt+completion tokens ({total_needed}) "
+                    f"exceeds num_ctx ({self.num_ctx}). Content will be truncated from "
+                    f"the FRONT of the prompt. Consider raising num_ctx or trimming input."
+                )
+
             payload = {
                 "model": self.model,
                 "prompt": prompt,
                 "stream": False,
                 "options": {
                     "temperature": temperature,
-                    "num_predict": max_tokens
+                    "num_predict": max_tokens,
+                    "num_ctx": self.num_ctx
                 }
             }
             headers = {"Content-Type": "application/json"}
@@ -183,6 +216,20 @@ class LLMClient:
             )
             r.raise_for_status()
             result = r.json()
+
+            # Ollama returns prompt_eval_count when available - use it to confirm
+            # whether truncation actually happened (more reliable than our estimate).
+            prompt_eval_count = result.get("prompt_eval_count")
+            if prompt_eval_count is not None:
+                print(f"[DEBUG] Ollama actually processed {prompt_eval_count} prompt tokens "
+                      f"(num_ctx={self.num_ctx}, estimated={estimated_prompt_tokens})")
+                if prompt_eval_count < estimated_prompt_tokens * 0.9:
+                    print(
+                        f"[WARNING] Actual prompt tokens processed ({prompt_eval_count}) is "
+                        f"notably lower than estimated ({estimated_prompt_tokens}) - "
+                        f"the prompt was likely truncated. Increase num_ctx."
+                    )
+
             return result.get("response", "No response received.")
         except requests.exceptions.Timeout:
             return "Error: LLM request timed out."
