@@ -196,6 +196,9 @@ class ContentBriefCreator:
         prompt_lines.extend([
             "**Return the entire brief in Markdown.**",
             "",
+            "🚨 CRITICAL: The brief MUST contain ALL 10 numbered sections below. Do NOT stop after the outline.",
+            "🚨 CRITICAL: Every H2 in the outline should also address structural elements from the audit (Key Takeaways box, FAQ block, freshness stamp, etc.)",
+            "",
             "**1. Content Title (SEO Optimized)**",
             "**2. Primary Search Intent & Audience**",
             "**3. Content Outline with Detailed Annotations**",
@@ -222,23 +225,29 @@ class ContentBriefCreator:
             "- [Specific point 2]",
             "",
             "Structure the outline hierarchically with 4-6 H2 sections, each with 2-4 H3 subsections.",
+            "IMPORTANT: If the audit specifies that the existing page covers a certain number of items (e.g. '5 trends'), your outline MUST cover ALL of them, not a subset.",
             "",
-            "**4. Key Talking Points & Evidence**",
-            "**5. On-page SEO Elements (Title, H1, Meta, URL)**",
-            "**6. Internal Links & Anchor Ideas**",
-            "**7. FAQs (3–5) and concise answers**",
-            "**8. Schema Suggestions**",
-            "**9. Competitive Differentiators**",
+            "**4. Key Talking Points & Evidence** (include specific data points, statistics, and customer proof points from the audit)",
+            "**5. On-page SEO Elements (Title, H1, Meta Description, URL)**",
+            "**6. Internal Links & Anchor Ideas** (MUST include any specific URLs mentioned in the audit as required internal links)",
+            "**7. FAQs (3–5) and concise answers** (address structural requirement from audit if FAQ block is specified)",
+            "**8. Schema Suggestions** (Article, FAQPage, Product, HowTo, etc. as appropriate)",
+            "**9. Competitive Differentiators** (based on audit's competitive positioning notes)",
             supporting_keywords_md,
+            "",
+            "**11. Additional Structural Requirements** (Key Takeaways box, freshness stamp, callout boxes, author box, etc. - specify placement in the outline)",
+            "**12. Customer Proof Points to Include** (list specific customer names/case studies from the audit)",
+            "",
+            "🚨 FINAL CHECK before returning: Have you addressed EVERY item listed in the AUDIT REQUIREMENTS block at the top of this prompt? Every citation, every product name, every recommendation, every structural element?",
         ])
 
         prompt = "\n".join(prompt_lines)
 
-        # Generate brief - increased tokens since audit requirements need proper coverage
+        # Generate brief - increased tokens to accommodate all required sections + audit requirements
         result = self.llm.complete(
             prompt,
             temperature=0.7,
-            max_tokens=3500
+            max_tokens=5000
         )
 
         if not result or result.startswith("Error"):
@@ -266,8 +275,8 @@ class ContentBriefCreator:
         parsed_audit: Dict[str, Any]
     ) -> str:
         """
-        Append audit compliance report to brief.
-        Shows which mandatory elements from the audit were addressed.
+        Append comprehensive audit compliance report to brief.
+        Shows which mandatory elements from the audit were addressed across ALL categories.
         """
         try:
             from analysis.audit_parser import AuditParser
@@ -279,33 +288,95 @@ class ContentBriefCreator:
 
         additions = ["\n\n---\n\n## ✅ Audit Compliance Report\n"]
         
+        # Overall score
         score = compliance.get("compliance_score", 0)
+        passed = compliance.get("passed_checks", 0)
+        total = compliance.get("total_checks", 0)
+        
         if score >= 90:
-            additions.append(f"\n**Compliance Score:** 🟢 {score}% ({compliance['passed_checks']}/{compliance['total_checks']} checks passed)\n")
+            emoji = "🟢"
         elif score >= 70:
-            additions.append(f"\n**Compliance Score:** 🟡 {score}% ({compliance['passed_checks']}/{compliance['total_checks']} checks passed)\n")
+            emoji = "🟡"
         else:
-            additions.append(f"\n**Compliance Score:** 🔴 {score}% ({compliance['passed_checks']}/{compliance['total_checks']} checks passed)\n")
-
-        if compliance.get("citations_included"):
-            additions.append("\n### ✅ Citations Included\n")
-            for c in compliance["citations_included"]:
-                additions.append(f"- {c}\n")
-
-        if compliance.get("citations_missing"):
-            additions.append("\n### ❌ Citations MISSING (add these to brief)\n")
-            for c in compliance["citations_missing"]:
-                additions.append(f"- {c}\n")
-
-        if compliance.get("products_included"):
-            additions.append("\n### ✅ Products Mentioned\n")
-            for p in compliance["products_included"]:
-                additions.append(f"- {p}\n")
-
-        if compliance.get("products_missing"):
-            additions.append("\n### ❌ Products MISSING (add these to brief)\n")
-            for p in compliance["products_missing"]:
-                additions.append(f"- {p}\n")
+            emoji = "🔴"
+        
+        additions.append(f"\n**Overall Compliance:** {emoji} **{score}%** ({passed}/{total} checks passed)\n")
+        
+        # Category breakdown
+        cat_scores = compliance.get("category_scores", {})
+        if cat_scores:
+            additions.append("\n### 📊 Score by Category\n")
+            category_labels = {
+                "citations": "🔖 Citations",
+                "products": "📦 Product Mentions",
+                "data_points": "📊 Data Points",
+                "structural": "🏗️ Structural Elements",
+                "customer_proof": "👥 Customer Proof",
+                "internal_links": "🔗 Internal Links",
+                "recommendations": "📋 Recommendations",
+                "gaps": "❌ Critical Gaps Addressed",
+            }
+            for key, label in category_labels.items():
+                cat_score = cat_scores.get(key)
+                if cat_score is not None:
+                    if cat_score >= 80:
+                        icon = "✅"
+                    elif cat_score >= 50:
+                        icon = "🟡"
+                    else:
+                        icon = "🔴"
+                    additions.append(f"- {icon} **{label}:** {cat_score}%\n")
+        
+        # Detailed pass/fail for each category
+        category_details = [
+            ("citations_included", "citations_missing", "🔖 Citations", "Citation"),
+            ("products_included", "products_missing", "📦 Product Mentions", "Product"),
+            ("data_points_included", "data_points_missing", "📊 Data Points", "Data point"),
+            ("structural_included", "structural_missing", "🏗️ Structural Elements", "Structural element"),
+            ("customer_proof_included", "customer_proof_missing", "👥 Customer Proof Points", "Customer proof"),
+            ("internal_links_included", "internal_links_missing", "🔗 Internal Links", "Internal link"),
+            ("recommendations_included", "recommendations_missing", "📋 Prioritized Recommendations", "Recommendation"),
+            ("gaps_addressed", "gaps_still_open", "❌ Critical Gaps", "Gap"),
+        ]
+        
+        # Show what's missing first (more actionable)
+        missing_sections = []
+        for included_key, missing_key, section_label, item_label in category_details:
+            missing = compliance.get(missing_key, [])
+            if missing:
+                missing_sections.append((section_label, missing))
+        
+        if missing_sections:
+            additions.append("\n### ⚠️ Missing From Brief - Add These:\n")
+            for section_label, missing in missing_sections:
+                additions.append(f"\n**{section_label}:**\n")
+                for item in missing:
+                    # Truncate very long items for display
+                    display_item = item if len(item) < 200 else item[:197] + "..."
+                    additions.append(f"- ❌ {display_item}\n")
+        
+        # Show what was included (positive reinforcement + verification)
+        included_sections = []
+        for included_key, missing_key, section_label, item_label in category_details:
+            included = compliance.get(included_key, [])
+            if included:
+                included_sections.append((section_label, included))
+        
+        if included_sections:
+            additions.append("\n### ✅ Successfully Included:\n")
+            for section_label, included in included_sections:
+                additions.append(f"\n**{section_label}:**\n")
+                for item in included:
+                    display_item = item if len(item) < 200 else item[:197] + "..."
+                    additions.append(f"- ✅ {display_item}\n")
+        
+        # Add improvement guidance
+        if score < 90:
+            additions.append("\n---\n### 💡 To Improve Compliance:\n")
+            if score < 50:
+                additions.append("- Consider regenerating the brief - major requirements are missing\n")
+            additions.append("- Manually add the missing items listed above before delivering to the client\n")
+            additions.append("- The brief prompt may need more explicit instruction about the missing categories\n")
 
         return brief + "".join(additions)
 
