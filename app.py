@@ -181,6 +181,7 @@ def init_state():
         "query_topic": "",
         "client_url": "",
         "report_content": "",
+        "parsed_audit": None,
         "llm_analysis_output": "",
         "fetched_webpage_content": "",
         "analyzed_keywords_df": None,
@@ -191,7 +192,6 @@ def init_state():
         "competitor_analysis": None,
         "keyword_clusters": {},
         "generated_brief_content": "",
-        "core_brief_content": "",
         "drafted_content": "",
     }
     for k, v in defaults.items():
@@ -277,6 +277,40 @@ def show_step1():
             with st.expander("Preview Uploaded Content"):
                 preview = st.session_state.report_content
                 st.code(preview[:1000] + "..." if len(preview) > 1000 else preview, language="markdown")
+            
+            # NEW: Parse audit to extract structured requirements
+            st.markdown("---")
+            st.markdown("#### 📋 Audit Requirements Extraction")
+            st.caption("Parse the audit to extract mandatory citations, product mentions, and recommendations that MUST appear in the brief.")
+            
+            if st.button("🔍 Extract Audit Requirements", key="parse_audit_btn"):
+                if not st.session_state.report_content:
+                    st.error("No audit content to parse.")
+                else:
+                    with st.spinner("Analyzing audit for required elements..."):
+                        try:
+                            from analysis.audit_parser import AuditParser
+                            parser = AuditParser()
+                            parsed = parser.parse_audit(st.session_state.report_content)
+                            st.session_state.parsed_audit = parsed
+                            
+                            if parsed.get("has_audit"):
+                                st.success(f"✅ Extracted {parsed.get('total_requirements', 0)} requirements from audit")
+                                
+                                # Show what was extracted
+                                with st.expander("📋 View Extracted Requirements", expanded=True):
+                                    st.markdown(parser.format_for_display(parsed))
+                            else:
+                                st.error(f"Parse failed: {parsed.get('error', 'Unknown error')}")
+                                if parsed.get('raw_response'):
+                                    with st.expander("Raw LLM response"):
+                                        st.code(parsed['raw_response'])
+                        except Exception as e:
+                            st.error(f"Failed to parse audit: {e}")
+            
+            # Show current parsed audit status
+            if st.session_state.get('parsed_audit') and st.session_state.parsed_audit.get('has_audit'):
+                st.info(f"📌 {st.session_state.parsed_audit.get('total_requirements', 0)} audit requirements will be enforced in the brief")
         except Exception as e:
             st.error(f"Error reading file: {e}")
     
@@ -895,17 +929,25 @@ def show_step4():
         if not st.session_state.selected_brief_keyword:
             st.error("Select a primary keyword in Step 2 to generate a brief.")
         else:
-            # DEBUG: Check if revisions exist
+            # DEBUG: Check what data is available
             st.write("---")
-            st.write("**🔍 DEBUG: Checking for revision data...**")
+            st.write("**🔍 DEBUG: Checking available data...**")
+            
             has_revisions = st.session_state.get('content_revisions') is not None
             if has_revisions:
                 rev_count = st.session_state.content_revisions.get('total_revisions', 0)
-                st.success(f"✅ FOUND revision data: {rev_count} changes will be included in brief")
-                st.write("Revision details:", st.session_state.content_revisions.get('overall_assessment', 'N/A'))
+                st.success(f"✅ Content revisions: {rev_count} changes")
             else:
-                st.error("❌ NO revision data found - brief will NOT include revision insights")
-                st.write("Did you run 'Generate Revision Recommendations' in Step 3?")
+                st.warning("⚠️ No content revisions")
+            
+            has_parsed_audit = st.session_state.get('parsed_audit') is not None and st.session_state.parsed_audit.get('has_audit')
+            if has_parsed_audit:
+                req_count = st.session_state.parsed_audit.get('total_requirements', 0)
+                st.success(f"✅ Parsed audit: {req_count} requirements will be enforced")
+            elif st.session_state.get('report_content'):
+                st.warning("⚠️ Audit uploaded but NOT parsed. Go back to Step 1 and click 'Extract Audit Requirements' for much better briefs.")
+            else:
+                st.info("ℹ️ No audit uploaded")
             st.write("---")
             
             with st.spinner(f"Generating content brief with {llm_client.model}..."):
@@ -923,13 +965,11 @@ def show_step4():
                     competitor_analysis=st.session_state.competitor_analysis,
                     advanced_analysis=st.session_state.get('advanced_analysis'),
                     page_type=st.session_state.get('page_type', 'blog_post'),
-                    content_revisions=st.session_state.get('content_revisions')
+                    content_revisions=st.session_state.get('content_revisions'),
+                    parsed_audit=st.session_state.get('parsed_audit')
                 )
 
             if st.session_state.generated_brief_content and not st.session_state.generated_brief_content.startswith("Error"):
-                # Store core brief (pre-advanced-analysis) in session state for Opal payload
-                st.session_state.core_brief_content = getattr(brief_creator, '_core_brief_markdown', st.session_state.generated_brief_content)
-
                 # Enhance with page type requirements
                 st.session_state.generated_brief_content = PageTypeManager.enhance_brief_for_page_type(
                     st.session_state.generated_brief_content,
@@ -952,105 +992,12 @@ def show_step4():
         )
         st.session_state.generated_brief_content = edited
 
-        # Download button
         st.download_button(
-            "⬇ Download Brief (Markdown)",
+            "Download Brief (Markdown)",
             data=edited.encode("utf-8"),
             file_name=f"content_brief_{datetime.now().strftime('%Y%m%d_%H%M')}.md",
             mime="text/markdown"
         )
-
-        # ========== Opal Webhook Section ==========
-        st.divider()
-        st.subheader("🚀 Send to Optimizely Opal")
-        st.info("POST this brief directly to the Opal workflow agent via webhook.")
-
-        # Get webhook config from env or UI
-        opal_webhook_url = os.environ.get("OPAL_WEBHOOK_URL", "")
-        opal_bearer_token = os.environ.get("OPAL_BEARER_TOKEN", "")
-
-        with st.expander("⚙️ Opal Webhook Configuration", expanded=not bool(opal_webhook_url)):
-            webhook_url_input = st.text_input(
-                "Opal Webhook URL",
-                value=opal_webhook_url,
-                placeholder="https://app.optimizely.com/webhooks/...",
-                help="The Opal-generated webhook URL. Set OPAL_WEBHOOK_URL env var to avoid entering this each time."
-            )
-            bearer_token_input = st.text_input(
-                "Bearer Token",
-                value=opal_bearer_token,
-                type="password",
-                help="Your secret auth token. Set OPAL_BEARER_TOKEN env var to avoid entering this each time."
-            )
-            auth_header_name_input = st.text_input(
-                "Auth Header Name",
-                value="Authorization",
-                help="Header name for the Bearer token (default: Authorization)"
-            )
-
-            # Use UI values if env vars not set
-            if webhook_url_input:
-                opal_webhook_url = webhook_url_input
-            if bearer_token_input:
-                opal_bearer_token = bearer_token_input
-
-        # JSON preview
-        with st.expander("👁 Preview JSON payload", expanded=False):
-            import json
-            gap_record = brief_creator.to_gap_record_json(
-                brief_markdown=st.session_state.get('core_brief_content', st.session_state.generated_brief_content),
-                keyword=st.session_state.selected_brief_keyword or "",
-                client_url=st.session_state.client_url or "",
-                page_type=st.session_state.get('page_type', 'blog_post'),
-                related_keywords=st.session_state.related_keywords_for_brief,
-                content_revisions=st.session_state.get('content_revisions')
-            )
-            st.json(gap_record)
-
-            # Also offer JSON download
-            st.download_button(
-                "⬇ Download as JSON",
-                data=json.dumps(gap_record, indent=2, ensure_ascii=False).encode("utf-8"),
-                file_name=f"gap_record_{datetime.now().strftime('%Y%m%d_%H%M')}.json",
-                mime="application/json"
-            )
-
-        # Send button
-        col1, col2 = st.columns([1, 2])
-        with col1:
-            send_to_opal = st.button(
-                "📤 Send to Opal",
-                type="primary",
-                key="send_to_opal",
-                disabled=not bool(opal_webhook_url and opal_bearer_token)
-            )
-
-        with col2:
-            if not opal_webhook_url:
-                st.warning("Enter the Opal webhook URL above to enable sending.")
-            elif not opal_bearer_token:
-                st.warning("Enter the Bearer token above to enable sending.")
-
-        if send_to_opal:
-            with st.spinner("Sending to Opal..."):
-                result = brief_creator.post_to_opal(
-                    brief_markdown=st.session_state.get('core_brief_content', st.session_state.generated_brief_content),
-                    keyword=st.session_state.selected_brief_keyword or "",
-                    client_url=st.session_state.client_url or "",
-                    webhook_url=opal_webhook_url,
-                    bearer_token=opal_bearer_token,
-                    auth_header_name=auth_header_name_input,
-                    page_type=st.session_state.get('page_type', 'blog_post'),
-                    related_keywords=st.session_state.related_keywords_for_brief,
-                    content_revisions=st.session_state.get('content_revisions')
-                )
-
-            if result.get("success"):
-                st.success(f"✅ Brief sent to Opal successfully (HTTP {result['status_code']})")
-            else:
-                st.error(f"❌ Failed to send to Opal (HTTP {result['status_code']})")
-                with st.expander("Response details"):
-                    st.code(result.get("response", "No response body"))
 
     # Navigation
     c1, c2, c3 = st.columns(3)
