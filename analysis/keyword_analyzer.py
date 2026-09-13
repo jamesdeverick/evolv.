@@ -28,7 +28,9 @@ class KeywordAnalyzer:
         Initialize keyword analyzer.
 
         Args:
-            scrapingdog_client: Configured Scrapingdog client
+            scrapingdog_client: Configured Scrapingdog client - also used for
+                                real search interest data (Google Trends) to
+                                filter out keywords with no real demand.
         """
         self.scrapingdog = scrapingdog_client
         self.llm = get_llm_client()
@@ -92,7 +94,8 @@ class KeywordAnalyzer:
         base_score: float,
         main_topic: str,
         desired_intent: str,
-        serp_insights: Optional[Dict] = None
+        serp_insights: Optional[Dict] = None,
+        trends_interest: Optional[float] = None
     ) -> Tuple[float, str, Dict]:
         """
         Calculate comprehensive keyword score with breakdown.
@@ -103,6 +106,15 @@ class KeywordAnalyzer:
             main_topic: Main topic for relevance
             desired_intent: Target content intent
             serp_insights: SERP analysis data
+            trends_interest: Real relative search interest from Google Trends
+                            (via Scrapingdog), 0-100 scale, if available. When
+                            provided, this becomes the DOMINANT scoring factor -
+                            a keyword nobody searches for should never outrank
+                            one with real demand, regardless of how "clean" it
+                            looks structurally. None means no Trends data was
+                            returned for this keyword (different from a
+                            confirmed 0, which means Trends returned data but
+                            interest was negligible across the whole window).
             
         Returns:
             Tuple of (final_score, grade, score_breakdown)
@@ -119,6 +131,7 @@ class KeywordAnalyzer:
             "specificity": 0,
             "question_value": 0,
             "serp_alignment": 0,
+            "trends_score": 0,
             "penalties": 0
         }
         
@@ -164,7 +177,30 @@ class KeywordAnalyzer:
             if themes and any(word in themes for word in words):
                 breakdown["serp_alignment"] = 50
         
-        # 6. PENALTIES
+        # 6. REAL SEARCH INTEREST (Google Trends via Scrapingdog, when
+        # available - this is the biggest fix). Without this, keywords that
+        # "look" plausible (right length, contains topic words) can outscore
+        # keywords nobody actually searches for. Trends gives a 0-100
+        # RELATIVE interest score, not an absolute volume number, so
+        # thresholds here are scaled 0-100, not raw search counts.
+        if trends_interest is not None:
+            if trends_interest == 0:
+                # Trends returned real data and interest was negligible
+                # across the whole 12-month window - heavy penalty
+                # regardless of how clean the keyword looks structurally
+                breakdown["penalties"] -= 200
+            elif trends_interest < 5:
+                breakdown["trends_score"] = 10
+            elif trends_interest < 15:
+                breakdown["trends_score"] = 60
+            elif trends_interest < 35:
+                breakdown["trends_score"] = 120
+            elif trends_interest < 60:
+                breakdown["trends_score"] = 180
+            else:
+                breakdown["trends_score"] = 220  # High relative interest - strong signal
+
+        # 7. PENALTIES
         # Low quality signals
         low_quality = ["cheap", "free", "hack", "trick", "secret"]
         if any(lq in k_lower for lq in low_quality):
@@ -192,6 +228,151 @@ class KeywordAnalyzer:
         
         return final_score, grade, breakdown
 
+    def analyze_keywords_batch(
+        self,
+        keywords: List[str],
+        all_keywords: List[str],
+        context: str = "",
+        batch_size: int = 8
+    ) -> List[Dict[str, Any]]:
+        """
+        Analyze MULTIPLE keywords in a small number of LLM calls instead of
+        one call per keyword. This is the main speed fix: 20 keywords used
+        to mean 20 sequential round-trips; this brings it down to ~2-3 calls.
+
+        Args:
+            keywords: List of keywords to analyze
+            all_keywords: Full list of keywords for relatedness context
+            context: Main topic for context
+            batch_size: How many keywords per LLM call (8 is a good balance -
+                       large enough to cut call count, small enough that the
+                       model doesn't lose track of items or truncate output)
+
+        Returns:
+            List of analysis dicts, one per input keyword, in the same order
+        """
+        if not keywords:
+            return []
+
+        if not self.llm.available:
+            return [self._fallback_keyword_analysis(kw) for kw in keywords]
+
+        results = []
+        context_kw_full = [
+            kw for kw in all_keywords[:50]
+            if kw.lower() not in COMMON_STOP_WORDS and len(kw) >= 3
+        ]
+
+        for i in range(0, len(keywords), batch_size):
+            batch = keywords[i:i + batch_size]
+            batch_results = self._analyze_batch_chunk(batch, context_kw_full, context)
+            results.extend(batch_results)
+
+        return results
+
+    def _analyze_batch_chunk(
+        self,
+        batch: List[str],
+        context_kw_full: List[str],
+        context: str
+    ) -> List[Dict[str, Any]]:
+        """Analyze a single batch (chunk) of keywords in ONE LLM call."""
+        # Exclude the batch's own keywords from the context list to avoid noise
+        batch_lower = {k.lower() for k in batch}
+        context_kw = [kw for kw in context_kw_full if kw.lower() not in batch_lower][:25]
+
+        keyword_list = "\n".join(f"{idx + 1}. {kw}" for idx, kw in enumerate(batch))
+
+        prompt = f"""Analyze these {len(batch)} keywords for SEO content planning.
+
+Main Topic: {context}
+
+Keywords to analyze:
+{keyword_list}
+
+Related keywords for context (use ONLY these exact strings when suggesting groupings):
+{', '.join(context_kw)}
+
+For EACH keyword above, determine:
+1. Primary search intent (Informational/Commercial/Transactional/Navigational)
+2. Should it have its own dedicated page, or be covered in existing content?
+3. Which related keywords (from the context list only) could be covered on the SAME page?
+
+Return ONLY a valid JSON array with EXACTLY {len(batch)} objects, in the SAME ORDER as the numbered list above. No markdown, no preamble, no explanation - just the array:
+
+[
+  {{"keyword": "exact keyword text", "inferred_intent": "Informational|Commercial|Transactional|Navigational", "needs_own_page": true|false, "rationale_for_own_page": "1 sentence", "semantically_related_keywords_for_grouping": ["kw1", "kw2"]}}
+]"""
+
+        try:
+            # Scale max_tokens with batch size - roughly 150-200 tokens per keyword result
+            raw = self.llm.complete(prompt, temperature=0.3, max_tokens=max(800, len(batch) * 220))
+
+            parsed_array = self._extract_json_array(raw)
+
+            if not parsed_array or len(parsed_array) == 0:
+                st.warning(f"Batch analysis returned no results for {len(batch)} keywords, using fallback scoring.")
+                return [self._fallback_keyword_analysis(kw) for kw in batch]
+
+            # Map results back to original keywords by position, with a
+            # safety fallback if the LLM returned a different count or
+            # reordered things (occasionally happens with smaller models)
+            results = []
+            for idx, kw in enumerate(batch):
+                if idx < len(parsed_array) and isinstance(parsed_array[idx], dict):
+                    item = parsed_array[idx]
+                    rel = item.get("semantically_related_keywords_for_grouping", [])
+                    rel = [r for r in rel if isinstance(r, str) and r in context_kw_full]
+                    results.append({
+                        "keyword": kw,  # Use original keyword, not LLM's echo (avoids drift)
+                        "inferred_intent": item.get("inferred_intent", self.infer_content_type(kw)),
+                        "needs_own_page": item.get("needs_own_page", False),
+                        "rationale_for_own_page": item.get("rationale_for_own_page", ""),
+                        "semantically_related_keywords_for_grouping": rel[:10]
+                    })
+                else:
+                    results.append(self._fallback_keyword_analysis(kw))
+
+            return results
+
+        except Exception as e:
+            st.warning(f"Batch keyword analysis failed: {str(e)[:150]}. Using fallback scoring for this batch.")
+            return [self._fallback_keyword_analysis(kw) for kw in batch]
+
+    def _extract_json_array(self, text: str) -> List[Dict]:
+        """Robustly extract a JSON array from LLM response text."""
+        cleaned = re.sub(r'^```(?:json)?\s*', '', text.strip())
+        cleaned = re.sub(r'\s*```$', '', cleaned)
+
+        try:
+            start = cleaned.index('[')
+            end = cleaned.rindex(']') + 1
+            json_str = cleaned[start:end]
+        except ValueError:
+            return []
+
+        try:
+            result = json.loads(json_str)
+            return result if isinstance(result, list) else []
+        except json.JSONDecodeError:
+            # Try fixing trailing commas
+            try:
+                fixed = re.sub(r',(\s*[}\]])', r'\1', json_str)
+                result = json.loads(fixed)
+                return result if isinstance(result, list) else []
+            except json.JSONDecodeError:
+                return []
+
+    def _fallback_keyword_analysis(self, keyword: str) -> Dict[str, Any]:
+        """Fallback analysis when LLM is unavailable or batch parsing fails."""
+        return {
+            "keyword": keyword,
+            "inferred_intent": self.infer_content_type(keyword),
+            "needs_own_page": False,
+            "rationale_for_own_page": "Heuristic fallback (LLM analysis unavailable or failed).",
+            "semantically_related_keywords_for_grouping": []
+        }
+
     def analyze_keyword_with_llm(
         self,
         keyword: str,
@@ -199,24 +380,13 @@ class KeywordAnalyzer:
         context: str = ""
     ) -> Dict[str, Any]:
         """
-        Analyze a single keyword using LLM for deeper insights.
-
-        Args:
-            keyword: Target keyword to analyze
-            all_keywords: Full list of keywords for context
-            context: Additional context (main topic, etc.)
-
-        Returns:
-            Dict with keyword analysis
+        DEPRECATED for bulk use - kept for single-keyword ad-hoc analysis only
+        (e.g. re-analyzing one keyword after manual edit). For processing
+        multiple keywords, use analyze_keywords_batch() instead, which does
+        the same analysis in a fraction of the LLM calls.
         """
         if not self.llm.available:
-            return {
-                "keyword": keyword,
-                "inferred_intent": self.infer_content_type(keyword),
-                "needs_own_page": False,
-                "rationale_for_own_page": "LLM unavailable.",
-                "semantically_related_keywords_for_grouping": []
-            }
+            return self._fallback_keyword_analysis(keyword)
 
         # Get context keywords
         context_kw = [
@@ -292,6 +462,20 @@ Return ONLY valid JSON (no markdown, no preamble):
         """
         Main orchestrator for keyword analysis with improved scoring.
 
+        Reordered pipeline (vs. original):
+          1. Brainstorm + extract candidates (unchanged, cheap)
+          2. Dedupe (unchanged)
+          3. NEW: Pull real search interest data (Google Trends, via
+             Scrapingdog) for ALL candidates and drop confirmed-zero-interest
+             keywords BEFORE spending LLM time on them
+          4. Batch LLM analysis (2-3 calls instead of 20) on the SURVIVORS
+          5. Score everything, real volume data now dominates the score
+
+        This fixes both the speed complaint (20 sequential LLM calls -> 2-3
+        batched calls) and the relevance complaint (keywords that "look"
+        plausible but nobody searches for get filtered before they ever
+        reach the expensive analysis step).
+
         Args:
             query_topic: Main topic/query
             related_searches: Related searches from SERP
@@ -357,20 +541,57 @@ Return ONLY valid JSON (no markdown, no preamble):
 
         # 3. COMBINE AND DEDUPLICATE
         all_scored = llm_scored + serp_related_scored + serp_snippets_scored
-        
+
         # Semantic deduplication
         deduplicated = deduplicate_semantically(all_scored, similarity_threshold=0.75)
-        
+
         # Remove main query
         deduplicated = [(k, s) for k, s in deduplicated if k.lower() != query_topic.lower()]
 
-        # Sort by score
+        # Sort by heuristic score first (cheap, no API calls yet)
         sorted_keywords = sorted(deduplicated, key=lambda x: x[1], reverse=True)[:MAX_KEYWORD_ROWS]
 
-        # All keywords for context
+        # 4. NEW: PULL REAL SEARCH INTEREST DATA (GOOGLE TRENDS) AND FILTER
+        # CONFIRMED-DEAD KEYWORDS. This happens BEFORE the expensive LLM
+        # analysis step, so we're not wasting LLM calls analyzing keywords
+        # nobody searches for. Batched 5-at-a-time via Scrapingdog's Trends
+        # TIMESERIES endpoint (5 credits per call of up to 5 keywords).
+        trends_lookup: Dict[str, float] = {}
+        if sorted_keywords:
+            with st.spinner("Checking real search interest (Google Trends)..."):
+                candidate_kws = [kw for kw, _ in sorted_keywords]
+                try:
+                    trends_lookup = self.scrapingdog.get_trends_interest_batched(candidate_kws)
+                except Exception as e:
+                    st.warning(f"Google Trends lookup failed: {str(e)[:150]}. Falling back to heuristic scoring only.")
+                    trends_lookup = {}
+
+                if trends_lookup:
+                    found_count = len(trends_lookup)
+                    st.info(f"✓ Retrieved real search interest for {found_count}/{len(candidate_kws)} keywords")
+
+                    # Filter: drop keywords with CONFIRMED zero interest
+                    # across the whole 12-month window BEFORE spending LLM
+                    # time on them. Keep keywords Trends returned no data
+                    # for at all (could be too new/niche, or the request
+                    # failed for just that chunk) - they simply won't get
+                    # the interest score boost and will rank lower naturally
+                    # rather than being incorrectly dropped.
+                    before_count = len(sorted_keywords)
+                    sorted_keywords = [
+                        (kw, score) for kw, score in sorted_keywords
+                        if trends_lookup.get(kw, 1) != 0
+                    ]
+                    dropped = before_count - len(sorted_keywords)
+                    if dropped > 0:
+                        st.info(f"✓ Filtered out {dropped} keywords with confirmed zero search interest - saving LLM analysis time on dead keywords")
+                else:
+                    st.caption("💡 No Google Trends data returned - proceeding with heuristic scoring only.")
+
+        # All keywords for context (post-filtering)
         all_kw = [query_topic] + [k for k, _ in sorted_keywords]
 
-        # 4. BUILD DATAFRAME
+        # 5. BUILD DATAFRAME
         rows = []
 
         # Main topic
@@ -380,9 +601,10 @@ Return ONLY valid JSON (no markdown, no preamble):
             999999,
             query_topic,
             desired_content_intent,
-            serp_insights
+            serp_insights,
+            trends_interest=trends_lookup.get(query_topic)
         )
-        
+
         rows.append({
             "Selected": True,
             "Keyword": query_topic,
@@ -393,67 +615,75 @@ Return ONLY valid JSON (no markdown, no preamble):
             "Rationale for Own Page": "Main target keyword.",
             "Semantically Related Keywords": "",
             "Is PAA": "No",
+            "Search Interest": trends_lookup.get(query_topic, "—"),
             "Word Count": len(query_topic.split())
         })
 
-        # Analyze top 20 with LLM
+        # 6. BATCH LLM ANALYSIS (2-3 calls instead of 20 sequential calls)
         top_for_analysis = min(20, len(sorted_keywords))
-        
-        if self.llm.available and top_for_analysis > 0:
-            with st.spinner(f"Analyzing top {top_for_analysis} keywords..."):
-                progress = st.progress(0)
-                
-                for idx, (kw, base_score) in enumerate(sorted_keywords[:top_for_analysis]):
-                    info = self.analyze_keyword_with_llm(kw, all_kw, context=query_topic)
-                    
-                    final_score, grade, breakdown = self.calculate_keyword_score(
-                        kw,
-                        base_score,
-                        query_topic,
-                        desired_content_intent,
-                        serp_insights
-                    )
-                    
-                    rel = info.get("semantically_related_keywords_for_grouping", [])
-                    rel = [r for r in rel if r.lower() != query_topic.lower()]
-                    
-                    is_paa = (
-                        kw.endswith("?") or 
-                        any(kw.lower().startswith(q + " ") for q in ["what", "how", "why", "when", "where", "who"])
-                    )
-                    
-                    rows.append({
-                        "Selected": final_score >= 200,
-                        "Keyword": info.get("keyword", kw),
-                        "Inferred Potential Score": final_score,
-                        "Grade": grade,
-                        "Content Type": info.get("inferred_intent", self.infer_content_type(kw)),
-                        "Requires Own Content": "Yes" if info.get("needs_own_page", False) else "No",
-                        "Rationale for Own Page": info.get("rationale_for_own_page", ""),
-                        "Semantically Related Keywords": ", ".join(rel[:5]),
-                        "Is PAA": "Yes" if is_paa else "No",
-                        "Word Count": len(kw.split())
-                    })
-                    
-                    progress.progress((idx + 1) / top_for_analysis)
-                
-                progress.empty()
+        analysis_results: Dict[str, Dict] = {}
 
-        # Add remaining keywords
-        for kw, base_score in sorted_keywords[top_for_analysis:]:
+        if self.llm.available and top_for_analysis > 0:
+            top_keywords = [kw for kw, _ in sorted_keywords[:top_for_analysis]]
+            with st.spinner(f"Analyzing top {top_for_analysis} keywords (batched)..."):
+                batch_analysis = self.analyze_keywords_batch(
+                    top_keywords, all_kw, context=query_topic, batch_size=8
+                )
+                analysis_results = {item["keyword"]: item for item in batch_analysis}
+
+        for idx, (kw, base_score) in enumerate(sorted_keywords[:top_for_analysis]):
+            info = analysis_results.get(kw, self._fallback_keyword_analysis(kw))
+            interest = trends_lookup.get(kw)
+
             final_score, grade, breakdown = self.calculate_keyword_score(
                 kw,
                 base_score,
                 query_topic,
                 desired_content_intent,
-                serp_insights
+                serp_insights,
+                trends_interest=interest
             )
-            
+
+            rel = info.get("semantically_related_keywords_for_grouping", [])
+            rel = [r for r in rel if r.lower() != query_topic.lower()]
+
             is_paa = (
-                kw.endswith("?") or 
+                kw.endswith("?") or
+                any(kw.lower().startswith(q + " ") for q in ["what", "how", "why", "when", "where", "who"])
+            )
+
+            rows.append({
+                "Selected": final_score >= 200,
+                "Keyword": info.get("keyword", kw),
+                "Inferred Potential Score": final_score,
+                "Grade": grade,
+                "Content Type": info.get("inferred_intent", self.infer_content_type(kw)),
+                "Requires Own Content": "Yes" if info.get("needs_own_page", False) else "No",
+                "Rationale for Own Page": info.get("rationale_for_own_page", ""),
+                "Semantically Related Keywords": ", ".join(rel[:5]),
+                "Is PAA": "Yes" if is_paa else "No",
+                "Search Interest": interest if interest is not None else "—",
+                "Word Count": len(kw.split())
+            })
+
+        # Add remaining keywords (beyond top_for_analysis) - no LLM call,
+        # just heuristic + Trends interest scoring
+        for kw, base_score in sorted_keywords[top_for_analysis:]:
+            interest = trends_lookup.get(kw)
+            final_score, grade, breakdown = self.calculate_keyword_score(
+                kw,
+                base_score,
+                query_topic,
+                desired_content_intent,
+                serp_insights,
+                trends_interest=interest
+            )
+
+            is_paa = (
+                kw.endswith("?") or
                 any(kw.lower().startswith(q + " ") for q in ["what", "how", "why"])
             )
-            
+
             rows.append({
                 "Selected": final_score >= 250,
                 "Keyword": kw,
@@ -464,6 +694,7 @@ Return ONLY valid JSON (no markdown, no preamble):
                 "Rationale for Own Page": "Can be covered in main content.",
                 "Semantically Related Keywords": "",
                 "Is PAA": "Yes" if is_paa else "No",
+                "Search Interest": interest if interest is not None else "—",
                 "Word Count": len(kw.split())
             })
 
