@@ -6,7 +6,7 @@ import json
 import streamlit as st
 import requests
 from requests.adapters import HTTPAdapter, Retry
-from typing import Tuple, Optional, Dict, Any
+from typing import Tuple, Optional, Dict, Any, List
 from config import SCRAPINGDOG_TIMEOUT, SCRAPINGDOG_API_KEY
 
 
@@ -147,6 +147,8 @@ class ScrapingdogClient:
         """
         self.api_key = api_key
         self.base_url = "https://api.scrapingdog.com/google"
+        self.autocomplete_url = "https://api.scrapingdog.com/google_autocomplete"
+        self.trends_url = "https://api.scrapingdog.com/google_trends"
 
     @st.cache_data(ttl=1800, show_spinner=False)
     def get_keywords(_self, query: str):
@@ -280,3 +282,166 @@ class ScrapingdogClient:
             f"Body (first 400 chars):\n{body[:400]}"
         )
         return [], {}, ["No JSON"]
+
+    @st.cache_data(ttl=1800, show_spinner=False)
+    def get_autocomplete_suggestions(_self, query: str, country: str = "uk") -> List[str]:
+        """
+        Get real Google Autocomplete suggestions for a query.
+
+        Used as a cheap real-world corroboration signal: if Google doesn't
+        suggest a phrase, it's a reasonable indicator that few people type it.
+        Also useful as an additional keyword expansion source (autocomplete
+        surfaces real long-tail phrasing an LLM brainstorm can miss).
+
+        Endpoint: https://api.scrapingdog.com/google_autocomplete
+
+        Args:
+            query: Seed keyword/phrase
+            country: Two-letter country code (default matches rest of client: uk)
+
+        Returns:
+            List of suggestion strings (empty list on failure - fails soft,
+            never blocks the rest of the pipeline)
+        """
+        if not query or not query.strip():
+            return []
+
+        params = {
+            "api_key": _self.api_key,
+            "query": query,
+            "country": country
+        }
+        status, body, data = sd_request(_self.autocomplete_url, params, timeout=15)
+
+        if status in (401, 403):
+            st.warning(f"⚠ Scrapingdog autocomplete auth failed ({status}).")
+            return []
+
+        if not data:
+            return []
+
+        # Response shape: a list of suggestion strings, or list of dicts
+        # depending on API version - handle both defensively.
+        suggestions = []
+        raw_list = data if isinstance(data, list) else data.get("suggestions", data.get("data", []))
+
+        for item in raw_list or []:
+            if isinstance(item, str):
+                suggestions.append(item)
+            elif isinstance(item, dict):
+                val = item.get("value") or item.get("query") or item.get("suggestion")
+                if val:
+                    suggestions.append(val)
+
+        return suggestions
+
+    @st.cache_data(ttl=3600, show_spinner=False)
+    def get_trends_interest(_self, keywords: Tuple[str, ...], date_range: str = "today 12-m") -> Dict[str, float]:
+        """
+        Get real relative search interest (0-100 scale) for up to 5 keywords
+        in a single call via Google Trends TIMESERIES data.
+
+        This is the main real-demand signal for keyword scoring/filtering -
+        a keyword with an interest value of 0 across the whole window is a
+        strong signal nobody searches for it, and should be filtered out
+        BEFORE spending LLM analysis time on it.
+
+        Endpoint: https://api.scrapingdog.com/google_trends
+        Docs confirm: TIMESERIES mode supports up to 5 comma-separated
+        queries per call, 5 API credits per request. Batching keywords into
+        groups of 5 here (done by the caller) is significantly cheaper than
+        one call per keyword.
+
+        Args:
+            keywords: Tuple of up to 5 keywords (tuple, not list, so
+                      st.cache_data can hash it for caching)
+            date_range: Trends date window. "today 12-m" (12 months) is the
+                        default - stable enough to avoid single-week noise,
+                        recent enough to reflect current demand.
+
+        Returns:
+            Dict mapping each keyword -> average interest score (0-100).
+            Keywords with no data returned are omitted from the dict (NOT
+            assumed to be zero - caller should treat "missing" differently
+            from "confirmed zero", same principle as the DataForSEO version
+            we discussed but never shipped).
+        """
+        if not keywords:
+            return {}
+
+        kw_list = list(keywords)[:5]  # API hard limit for TIMESERIES
+        query_param = ",".join(kw_list)
+
+        params = {
+            "api_key": _self.api_key,
+            "query": query_param,
+            "data_type": "TIMESERIES",
+            "hl": "en",
+            "date": date_range
+        }
+        status, body, data = sd_request(_self.trends_url, params, timeout=30)
+
+        if status in (401, 403):
+            st.warning(f"⚠ Scrapingdog Trends auth failed ({status}).")
+            return {}
+
+        if not data:
+            return {}
+
+        timeline = (
+            data.get("interest_over_time", {})
+                .get("timeline_data", [])
+        )
+
+        if not timeline:
+            return {}
+
+        # Average the interest value for each keyword across all timeline
+        # points in the window - gives a single representative score rather
+        # than a whole time series, which is all the scoring logic needs.
+        sums: Dict[str, float] = {kw: 0.0 for kw in kw_list}
+        counts: Dict[str, int] = {kw: 0 for kw in kw_list}
+
+        for point in timeline:
+            for v in point.get("values", []):
+                q = v.get("query")
+                val = v.get("value")
+                if q in sums and val is not None:
+                    try:
+                        sums[q] += float(val)
+                        counts[q] += 1
+                    except (TypeError, ValueError):
+                        continue
+
+        results = {}
+        for kw in kw_list:
+            if counts[kw] > 0:
+                results[kw] = round(sums[kw] / counts[kw], 1)
+            # If counts[kw] == 0, deliberately omitted - "no data" not "zero"
+
+        return results
+
+    def get_trends_interest_batched(self, keywords: List[str], date_range: str = "today 12-m") -> Dict[str, float]:
+        """
+        Convenience wrapper: chunks an arbitrary-length keyword list into
+        groups of 5 (the API's per-call limit for TIMESERIES) and merges
+        the results. This is what keyword_analyzer.py should call directly
+        rather than handling chunking itself.
+
+        Args:
+            keywords: Any number of keywords
+            date_range: Passed through to get_trends_interest
+
+        Returns:
+            Merged dict of keyword -> interest score across all chunks
+        """
+        if not keywords:
+            return {}
+
+        merged: Dict[str, float] = {}
+        for i in range(0, len(keywords), 5):
+            chunk = tuple(keywords[i:i + 5])
+            chunk_results = self.get_trends_interest(chunk, date_range)
+            merged.update(chunk_results)
+
+        return merged
