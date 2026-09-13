@@ -468,7 +468,11 @@ def show_step2():
                 "Is PAA": st.column_config.CheckboxColumn("PAA?"),
                 "Content Type": st.column_config.TextColumn("Intent"),
                 "Requires Own Content": "Own Page?",
-                "Rationale for Own Page": "Rationale"
+                "Rationale for Own Page": "Rationale",
+                "Search Interest": st.column_config.TextColumn(
+                    "Interest (0-100)",
+                    help="Real relative search interest from Google Trends (via Scrapingdog), 0-100 scale, averaged over the last 12 months. '—' means no Trends data was returned (not necessarily zero demand - could be a niche or brand-new term)."
+                )
             },
             num_rows="dynamic",
             use_container_width=True,
