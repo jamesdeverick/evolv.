@@ -94,7 +94,33 @@ IMPORTANT RULES:
 - Prioritized recommendations should be in the ORDER the audit prioritizes them
 - Do not add generic SEO best practices - only what the audit specifically calls out"""
 
-        result = self.llm.complete(prompt, temperature=0.2, max_tokens=2500)
+        str_list = {"type": "array", "items": {"type": "string"}}
+        audit_schema = {
+            "type": "object",
+            "properties": {
+                "required_citations": str_list,
+                "required_product_mentions": str_list,
+                "required_data_points": str_list,
+                "required_structural_elements": str_list,
+                "prioritized_recommendations": {"type": "array", "items": {
+                    "type": "object",
+                    "properties": {"priority": {"type": "integer"},
+                                   "recommendation": {"type": "string"},
+                                   "why": {"type": "string"}},
+                    "required": ["priority", "recommendation", "why"]}},
+                "competitive_positioning": str_list,
+                "critical_gaps_to_fill": str_list,
+                "required_internal_links": str_list,
+                "customer_proof_points": str_list,
+                "tone_and_positioning_notes": str_list,
+                "executive_summary": {"type": "string"},
+            },
+            "required": ["required_citations", "required_product_mentions", "required_data_points",
+                         "required_structural_elements", "prioritized_recommendations",
+                         "competitive_positioning", "critical_gaps_to_fill", "required_internal_links",
+                         "customer_proof_points", "tone_and_positioning_notes", "executive_summary"],
+        }
+        result = self.llm.complete(prompt, temperature=0.2, max_tokens=3000, json_schema=audit_schema)
 
         if not result or result.startswith("Error"):
             return {

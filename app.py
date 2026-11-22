@@ -335,11 +335,14 @@ def show_step1():
             scrapingdog = get_scrapingdog_client()
             keyword_analyzer = KeywordAnalyzer(scrapingdog)
             related, paa, organics = scrapingdog.get_keywords(st.session_state.query_topic)
+            questions = scrapingdog.get_question_suggestions(st.session_state.query_topic)
+            st.session_state.paa_debug = {"paa": len(paa), "autocomplete_questions": len(questions)}
             df, selected_kw, serp_insights = keyword_analyzer.analyze_and_identify_keywords(
                 st.session_state.query_topic,
-                related + paa,
+                related + paa + questions,
                 organics,
-                st.session_state.desired_content_intent
+                st.session_state.desired_content_intent,
+                paa_questions=paa + questions
             )
             st.session_state.analyzed_keywords_df = df
             st.session_state.selected_brief_keyword = selected_kw

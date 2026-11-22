@@ -5,6 +5,7 @@
 
 import json
 import re
+import time
 import pandas as pd
 import streamlit as st
 from typing import List, Dict, Any, Optional, Tuple
@@ -124,8 +125,27 @@ class KeywordAnalyzer:
         word_count = len(words)
         
         # Initialize score components
+        # NOTE: base_score comes from the older extract_and_filter_keywords()
+        # length/frequency heuristic, which can easily produce 700-900+ for
+        # a 4-5 word LLM-brainstormed phrase (word-count value x topic-
+        # relevance multiplier x LLM-source multiplier x log-frequency).
+        # Left uncapped, that swamps every other signal in this function -
+        # including the real Google Trends interest score below, which tops
+        # out at 220. A word-salad phrase with 1.9 real search interest was
+        # still outscoring genuinely-searched keywords purely because of
+        # this legacy base value. Cap it so it's comparable in magnitude to
+        # the other factors, and let real signals (Trends, relevance,
+        # intent) actually decide the ranking.
+        # Exception: the main topic keyword is passed base_score=999999 as
+        # a deliberate sentinel to guarantee it always ranks first - leave
+        # that uncapped.
+        if base_score < 100000:
+            capped_base = min(base_score, 150)
+        else:
+            capped_base = base_score
+
         breakdown = {
-            "base": base_score,
+            "base": capped_base,
             "relevance": 0,
             "intent_match": 0,
             "specificity": 0,
@@ -189,14 +209,20 @@ class KeywordAnalyzer:
                 # across the whole 12-month window - heavy penalty
                 # regardless of how clean the keyword looks structurally
                 breakdown["penalties"] -= 200
+            elif trends_interest < 2:
+                # Effectively noise-floor - Trends often reports small
+                # nonzero values (0.3, 0.6, 1.1...) even for terms with no
+                # real demand. Treat these the same as confirmed zero
+                # rather than giving them a token positive score.
+                breakdown["penalties"] -= 150
             elif trends_interest < 5:
-                breakdown["trends_score"] = 10
+                breakdown["trends_score"] = 15
             elif trends_interest < 15:
-                breakdown["trends_score"] = 60
+                breakdown["trends_score"] = 70
             elif trends_interest < 35:
-                breakdown["trends_score"] = 120
+                breakdown["trends_score"] = 130
             elif trends_interest < 60:
-                breakdown["trends_score"] = 180
+                breakdown["trends_score"] = 190
             else:
                 breakdown["trends_score"] = 220  # High relative interest - strong signal
 
@@ -298,17 +324,29 @@ For EACH keyword above, determine:
 2. Should it have its own dedicated page, or be covered in existing content?
 3. Which related keywords (from the context list only) could be covered on the SAME page?
 
-Return ONLY a valid JSON array with EXACTLY {len(batch)} objects, in the SAME ORDER as the numbered list above. No markdown, no preamble, no explanation - just the array:
-
-[
-  {{"keyword": "exact keyword text", "inferred_intent": "Informational|Commercial|Transactional|Navigational", "needs_own_page": true|false, "rationale_for_own_page": "1 sentence", "semantically_related_keywords_for_grouping": ["kw1", "kw2"]}}
-]"""
+Return a JSON object with a "results" array of EXACTLY {len(batch)} objects, in the SAME ORDER as the numbered list above."""
 
         try:
             # Scale max_tokens with batch size - roughly 150-200 tokens per keyword result
-            raw = self.llm.complete(prompt, temperature=0.3, max_tokens=max(800, len(batch) * 220))
-
-            parsed_array = self._extract_json_array(raw)
+            schema = {
+                "type": "object",
+                "properties": {"results": {"type": "array", "items": {
+                    "type": "object",
+                    "properties": {
+                        "keyword": {"type": "string"},
+                        "inferred_intent": {"type": "string", "enum": ["Informational", "Commercial", "Transactional", "Navigational"]},
+                        "needs_own_page": {"type": "boolean"},
+                        "rationale_for_own_page": {"type": "string"},
+                        "semantically_related_keywords_for_grouping": {"type": "array", "items": {"type": "string"}}
+                    },
+                    "required": ["keyword", "inferred_intent", "needs_own_page",
+                                 "rationale_for_own_page", "semantically_related_keywords_for_grouping"]
+                }}},
+                "required": ["results"]
+            }
+            obj = self.llm.complete_json(prompt, schema, temperature=0.3,
+                                         max_tokens=max(800, len(batch) * 220))
+            parsed_array = obj.get("results") if isinstance(obj, dict) else obj
 
             if not parsed_array or len(parsed_array) == 0:
                 st.warning(f"Batch analysis returned no results for {len(batch)} keywords, using fallback scoring.")
@@ -457,7 +495,8 @@ Return ONLY valid JSON (no markdown, no preamble):
         query_topic: str,
         related_searches: List[str],
         organic_results: List[Dict],
-        desired_content_intent: str
+        desired_content_intent: str,
+        paa_questions: Optional[List[str]] = None
     ) -> tuple[pd.DataFrame, str, Dict[str, Any]]:
         """
         Main orchestrator for keyword analysis with improved scoring.
@@ -485,8 +524,20 @@ Return ONLY valid JSON (no markdown, no preamble):
         Returns:
             Tuple of (keywords_df, selected_keyword, serp_insights)
         """
+        # Timing instrumentation - so we can see exactly where time goes
+        # instead of guessing. Prints to terminal/Streamlit logs and shows
+        # a summary in the UI at the end of this method.
+        stage_times: Dict[str, float] = {}
+        t_start = time.time()
+        paa_set = {q.lower().strip().rstrip("?") for q in (paa_questions or [])}
+
+        def _is_paa(kw: str) -> bool:
+            return kw.lower().strip().rstrip("?") in paa_set
+
         # Get SERP results for analysis
+        t0 = time.time()
         serp_results, serp_raw, _ = self.scrapingdog.analyze_serp(query_topic)
+        stage_times["SERP fetch (analyze_serp)"] = time.time() - t0
 
         # Build SERP insights
         serp_titles = [s.get("title", "") for s in serp_results[:5]] if serp_results else []
@@ -497,6 +548,7 @@ Return ONLY valid JSON (no markdown, no preamble):
         }
 
         # 1. BRAINSTORM KEYWORDS WITH LLM
+        t0 = time.time()
         llm_brainstormed = []
         if self.llm.available:
             with st.spinner(f"Brainstorming keyword variations with {self.llm.model}..."):
@@ -510,8 +562,10 @@ Return ONLY valid JSON (no markdown, no preamble):
                 st.info(f"✓ LLM generated {len(llm_brainstormed)} keyword variations")
         else:
             st.warning("LLM unavailable; using SERP-only keywords.")
+        stage_times["LLM brainstorm"] = time.time() - t0
 
         # 2. EXTRACT AND SCORE FROM ALL SOURCES
+        t0 = time.time()
         initial_words = query_topic.split()
 
         llm_scored = extract_and_filter_keywords(
@@ -544,6 +598,7 @@ Return ONLY valid JSON (no markdown, no preamble):
 
         # Semantic deduplication
         deduplicated = deduplicate_semantically(all_scored, similarity_threshold=0.75)
+        stage_times["Extract + semantic dedup"] = time.time() - t0
 
         # Remove main query
         deduplicated = [(k, s) for k, s in deduplicated if k.lower() != query_topic.lower()]
@@ -557,6 +612,7 @@ Return ONLY valid JSON (no markdown, no preamble):
         # nobody searches for. Batched 5-at-a-time via Scrapingdog's Trends
         # TIMESERIES endpoint (5 credits per call of up to 5 keywords).
         trends_lookup: Dict[str, float] = {}
+        t0 = time.time()
         if sorted_keywords:
             with st.spinner("Checking real search interest (Google Trends)..."):
                 candidate_kws = [kw for kw, _ in sorted_keywords]
@@ -587,6 +643,7 @@ Return ONLY valid JSON (no markdown, no preamble):
                         st.info(f"✓ Filtered out {dropped} keywords with confirmed zero search interest - saving LLM analysis time on dead keywords")
                 else:
                     st.caption("💡 No Google Trends data returned - proceeding with heuristic scoring only.")
+        stage_times["Google Trends lookup"] = time.time() - t0
 
         # All keywords for context (post-filtering)
         all_kw = [query_topic] + [k for k, _ in sorted_keywords]
@@ -620,6 +677,7 @@ Return ONLY valid JSON (no markdown, no preamble):
         })
 
         # 6. BATCH LLM ANALYSIS (2-3 calls instead of 20 sequential calls)
+        t0 = time.time()
         top_for_analysis = min(20, len(sorted_keywords))
         analysis_results: Dict[str, Dict] = {}
 
@@ -630,6 +688,7 @@ Return ONLY valid JSON (no markdown, no preamble):
                     top_keywords, all_kw, context=query_topic, batch_size=8
                 )
                 analysis_results = {item["keyword"]: item for item in batch_analysis}
+        stage_times["Batch LLM keyword analysis"] = time.time() - t0
 
         for idx, (kw, base_score) in enumerate(sorted_keywords[:top_for_analysis]):
             info = analysis_results.get(kw, self._fallback_keyword_analysis(kw))
@@ -647,10 +706,7 @@ Return ONLY valid JSON (no markdown, no preamble):
             rel = info.get("semantically_related_keywords_for_grouping", [])
             rel = [r for r in rel if r.lower() != query_topic.lower()]
 
-            is_paa = (
-                kw.endswith("?") or
-                any(kw.lower().startswith(q + " ") for q in ["what", "how", "why", "when", "where", "who"])
-            )
+            is_paa = _is_paa(kw)
 
             rows.append({
                 "Selected": final_score >= 200,
@@ -679,10 +735,7 @@ Return ONLY valid JSON (no markdown, no preamble):
                 trends_interest=interest
             )
 
-            is_paa = (
-                kw.endswith("?") or
-                any(kw.lower().startswith(q + " ") for q in ["what", "how", "why"])
-            )
+            is_paa = _is_paa(kw)
 
             rows.append({
                 "Selected": final_score >= 250,
@@ -716,6 +769,17 @@ Return ONLY valid JSON (no markdown, no preamble):
 
         # Sort by score
         df = df.sort_values("Inferred Potential Score", ascending=False).reset_index(drop=True)
+
+        # TIMING SUMMARY - shows exactly where time went, so slowness can be
+        # diagnosed from real numbers instead of guessing which stage to
+        # optimize next.
+        total_time = time.time() - t_start
+        with st.expander(f"⏱️ Timing breakdown (total: {total_time:.1f}s)", expanded=False):
+            for stage, elapsed in stage_times.items():
+                pct = (elapsed / total_time * 100) if total_time > 0 else 0
+                st.write(f"- **{stage}:** {elapsed:.1f}s ({pct:.0f}%)")
+        print(f"[TIMING] Total keyword analysis: {total_time:.1f}s | " +
+              " | ".join(f"{k}: {v:.1f}s" for k, v in stage_times.items()))
 
         return df, query_topic, serp_insights
 

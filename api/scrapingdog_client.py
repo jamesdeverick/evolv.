@@ -63,6 +63,34 @@ def sd_request(url: str, params: dict, timeout: int = SCRAPINGDOG_TIMEOUT) -> Tu
         return 0, str(e), None
 
 
+def extract_paa(data) -> List[str]:
+    """Tolerantly pull People Also Ask questions from a Scrapingdog response.
+
+    Docs name the key `peopleAlsoAskedFor` (items: question/rank/snippet), but
+    we also accept other plausible names so a format change doesn't silently
+    zero PAA again.
+    """
+    if not isinstance(data, dict):
+        return []
+    out: List[str] = []
+    for k, v in data.items():
+        kl = k.lower().replace("_", "")
+        if not isinstance(v, list):
+            continue
+        if kl in ("peoplealsoaskedfor", "peoplealsoask", "relatedquestions", "paa") or \
+                ("people" in kl and "ask" in kl):
+            for item in v:
+                if isinstance(item, str):
+                    q = item
+                elif isinstance(item, dict):
+                    q = item.get("question") or item.get("title") or item.get("query")
+                else:
+                    q = None
+                if q and q not in out:
+                    out.append(q.strip())
+    return out
+
+
 @st.cache_data(ttl=300, show_spinner=False)
 def probe_scrapingdog_status(api_key: str) -> Dict[str, Any]:
     """
@@ -88,7 +116,7 @@ def probe_scrapingdog_status(api_key: str) -> Dict[str, Any]:
         }
 
     url = "https://api.scrapingdog.com/google"
-    params = {"api_key": api_key, "query": "test"}
+    params = {"api_key": api_key, "query": "what is kubernetes"}
     status, body, data = sd_request(url, params, timeout=20)
 
     result = {
@@ -116,9 +144,7 @@ def probe_scrapingdog_status(api_key: str) -> Dict[str, Any]:
         for k in ("relatedSearches", "related_searches"):
             related += [s.get("query") for s in data.get(k, []) if s.get("query")]
 
-        paa = []
-        for k in ("peopleAlsoAskedFor", "people_also_asked_for"):
-            paa += [q.get("question") for q in data.get(k, []) if q.get("question")]
+        paa = extract_paa(data)
 
         organics = data.get("organic_results", []) or []
 
@@ -188,12 +214,13 @@ class ScrapingdogClient:
                 ])
 
             # Parse people also ask
-            paa = []
-            for key in ("peopleAlsoAskedFor", "people_also_asked_for"):
-                paa.extend([
-                    q.get("question") for q in data.get(key, [])
-                    if q.get("question")
-                ])
+            paa = extract_paa(data)
+            if not paa:
+                st.caption(
+                    "ℹ️ No People Also Ask box in Google's response for this query "
+                    f"(response keys: {', '.join(list(data.keys())[:15])}). "
+                    "Question-style autocomplete will be used instead."
+                )
 
             # Parse organic results
             organics = []
@@ -334,6 +361,24 @@ class ScrapingdogClient:
                     suggestions.append(val)
 
         return suggestions
+
+    def get_question_suggestions(_self, query: str, max_total: int = 20) -> List[str]:
+        """Question-style long-tail ideas from real Google Autocomplete.
+
+        Fallback/supplement for People Also Ask, which Google only shows on
+        some queries. Queries autocomplete with question prefixes.
+        """
+        prefixes = ["what is", "how to", "why", "how does", "is", "can", "does", "what are"]
+        found: List[str] = []
+        base = query.strip()
+        for pre in prefixes:
+            for sug in _self.get_autocomplete_suggestions(f"{pre} {base}"):
+                sug = sug.strip()
+                if sug and sug.lower() not in (f.lower() for f in found):
+                    found.append(sug)
+            if len(found) >= max_total:
+                break
+        return found[:max_total]
 
     @st.cache_data(ttl=3600, show_spinner=False)
     def get_trends_interest(_self, keywords: Tuple[str, ...], date_range: str = "today 12-m") -> Dict[str, float]:

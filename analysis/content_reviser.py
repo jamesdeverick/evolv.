@@ -104,7 +104,29 @@ Return this exact JSON structure:
 """
         
         try:
-            result = self.llm.complete(prompt, temperature=0.3, max_tokens=2500)
+            rev_schema = {
+                "type": "object",
+                "properties": {
+                    "revisions": {"type": "array", "items": {
+                        "type": "object",
+                        "properties": {
+                            "section_name": {"type": "string"},
+                            "original_text": {"type": "string"},
+                            "suggested_text": {"type": "string"},
+                            "reason": {"type": "string"},
+                            "priority": {"type": "string", "enum": ["high", "medium", "low"]},
+                            "change_type": {"type": "string", "enum": [
+                                "keyword_insertion", "entity_addition",
+                                "eeat_strengthening", "clarity_improvement"]},
+                        },
+                        "required": ["section_name", "original_text", "suggested_text",
+                                     "reason", "priority", "change_type"]}},
+                    "overall_assessment": {"type": "string"},
+                    "quick_wins": {"type": "array", "items": {"type": "string"}},
+                },
+                "required": ["revisions", "overall_assessment", "quick_wins"],
+            }
+            result = self.llm.complete(prompt, temperature=0.3, max_tokens=3500, json_schema=rev_schema)
             
             # Parse JSON with better error handling
             import json

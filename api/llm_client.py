@@ -3,6 +3,7 @@
 # --------------------------------------------
 
 import json
+import os
 import requests
 from typing import Dict, Any, Optional
 import litellm
@@ -40,7 +41,13 @@ except ImportError:
 # audit-heavy prompts (structured requirements block + raw audit text +
 # webpage content + LLM analysis + SERP data) can comfortably exceed 16K.
 # RTX 3090 has ample VRAM headroom for a 7B model even at full context.
-OLLAMA_DEFAULT_NUM_CTX = 32768
+# Override with env var OLLAMA_NUM_CTX. Mistral Small 3.2 (24B) needs far more
+# VRAM for KV cache than a 7B model, so 16384 is a safer default there.
+OLLAMA_DEFAULT_NUM_CTX = int(os.environ.get("OLLAMA_NUM_CTX", "16384"))
+# Env overrides so the model can be swapped without code edits:
+#   export OLLAMA_MODEL=mistral-small3.2   (pull it first: ollama pull mistral-small3.2)
+OLLAMA_MODEL_OVERRIDE = os.environ.get("OLLAMA_MODEL")
+LLM_TIMEOUT_OVERRIDE = os.environ.get("LLM_TIMEOUT")
 
 
 class LLMClient:
@@ -80,7 +87,7 @@ class LLMClient:
 
     def _configure_ollama(self):
         """Configure Ollama (local deployment)."""
-        self.model = OLLAMA_MODEL
+        self.model = OLLAMA_MODEL_OVERRIDE or OLLAMA_MODEL
         self.api_base = OLLAMA_API_BASE
 
         try:
@@ -89,7 +96,10 @@ class LLMClient:
             r.raise_for_status()
             models = [m.get("name") for m in (r.json().get("models") or [])]
 
-            if self.model not in models:
+            # Tolerate the implicit ':latest' tag (e.g. 'mistral-small3.2' vs
+            # 'mistral-small3.2:latest').
+            names = set(models) | {m[:-7] for m in models if m and m.endswith(":latest")}
+            if self.model not in names:
                 self.available = False
                 self.error = f"Model '{self.model}' not found. Available: {models}"
             else:
@@ -153,7 +163,8 @@ class LLMClient:
         }
 
     def complete(self, prompt: str, temperature: float = 0.7,
-                max_tokens: int = 2000, system_prompt: Optional[str] = None) -> str:
+                max_tokens: int = 2000, system_prompt: Optional[str] = None,
+                json_schema: Optional[Dict[str, Any]] = None) -> str:
         """
         Generate completion using configured LLM provider.
 
@@ -171,7 +182,7 @@ class LLMClient:
 
         try:
             if self.provider == "ollama":
-                return self._complete_ollama(prompt, temperature, max_tokens)
+                return self._complete_ollama(prompt, temperature, max_tokens, json_schema)
             elif self.provider == "anthropic":
                 return self._complete_anthropic(prompt, temperature, max_tokens, system_prompt)
             else:
@@ -179,11 +190,37 @@ class LLMClient:
         except Exception as e:
             return f"Error during LLM completion: {e}"
 
+    def complete_json(self, prompt: str, schema: Dict[str, Any], temperature: float = 0.2,
+                      max_tokens: int = 2000) -> Optional[Any]:
+        """Return parsed JSON matching `schema`, or None on any failure.
+
+        Uses Ollama structured outputs. For other providers it falls back to
+        plain completion plus tolerant parsing.
+        """
+        raw = self.complete(prompt, temperature=temperature, max_tokens=max_tokens,
+                            json_schema=schema if self.provider == "ollama" else None)
+        if not raw or raw.startswith("Error"):
+            return None
+        try:
+            return json.loads(raw)
+        except Exception:
+            pass
+        import re
+        t = re.sub(r"^```(?:json)?|```$", "", raw.strip(), flags=re.M).strip()
+        m = re.search(r"[\[{].*[\]}]", t, re.S)
+        if m:
+            try:
+                return json.loads(re.sub(r",\s*([\]}])", r"\1", m.group(0)))
+            except Exception:
+                return None
+        return None
+
     def _estimate_tokens(self, text: str) -> int:
         """Rough token estimate (chars / 4 is a reasonable approximation for English text)."""
         return len(text) // 4
 
-    def _complete_ollama(self, prompt: str, temperature: float, max_tokens: int) -> str:
+    def _complete_ollama(self, prompt: str, temperature: float, max_tokens: int,
+                         json_schema: Optional[Dict[str, Any]] = None) -> str:
         """Direct Ollama API call."""
         try:
             # Warn (via print, visible in Streamlit logs) if prompt + max_tokens
@@ -207,12 +244,17 @@ class LLMClient:
                     "num_ctx": self.num_ctx
                 }
             }
+            if json_schema:
+                # Ollama structured outputs: constrains decoding to the schema,
+                # so the reply is guaranteed to be valid JSON of this shape.
+                payload["format"] = json_schema
+                payload["options"]["temperature"] = min(temperature, 0.3)
             headers = {"Content-Type": "application/json"}
             r = requests.post(
                 f"{self.api_base}/api/generate",
                 headers=headers,
                 data=json.dumps(payload),
-                timeout=LLM_TIMEOUT
+                timeout=int(LLM_TIMEOUT_OVERRIDE) if LLM_TIMEOUT_OVERRIDE else LLM_TIMEOUT
             )
             r.raise_for_status()
             result = r.json()
