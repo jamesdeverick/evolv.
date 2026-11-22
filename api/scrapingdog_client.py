@@ -66,30 +66,46 @@ def sd_request(url: str, params: dict, timeout: int = SCRAPINGDOG_TIMEOUT) -> Tu
 def extract_paa(data) -> List[str]:
     """Tolerantly pull People Also Ask questions from a Scrapingdog response.
 
-    Docs name the key `peopleAlsoAskedFor` (items: question/rank/snippet), but
-    we also accept other plausible names so a format change doesn't silently
-    zero PAA again.
+    Handles list-of-dicts, list-of-strings, or a dict wrapping a list, and
+    several item field names.
     """
     if not isinstance(data, dict):
         return []
     out: List[str] = []
+
+    def add(item):
+        if isinstance(item, str):
+            q = item
+        elif isinstance(item, dict):
+            q = next((item.get(f) for f in ("question", "title", "query", "text", "name")
+                      if isinstance(item.get(f), str) and item.get(f).strip()), None)
+        else:
+            q = None
+        if q and q.strip() not in out:
+            out.append(q.strip())
+
     for k, v in data.items():
         kl = k.lower().replace("_", "")
-        if not isinstance(v, list):
+        if not (kl in ("peoplealsoaskedfor", "peoplealsoask", "relatedquestions", "paa")
+                or ("people" in kl and "ask" in kl)):
             continue
-        if kl in ("peoplealsoaskedfor", "peoplealsoask", "relatedquestions", "paa") or \
-                ("people" in kl and "ask" in kl):
+        if isinstance(v, dict):
+            v = next((x for x in v.values() if isinstance(x, list)), [])
+        if isinstance(v, list):
             for item in v:
-                if isinstance(item, str):
-                    q = item
-                elif isinstance(item, dict):
-                    q = item.get("question") or item.get("title") or item.get("query")
-                else:
-                    q = None
-                if q and q not in out:
-                    out.append(q.strip())
+                add(item)
     return out
 
+
+def describe_paa_raw(data) -> str:
+    """Short description of the raw PAA field, for debugging empty results."""
+    if not isinstance(data, dict):
+        return "response not a dict"
+    for k, v in data.items():
+        kl = k.lower().replace("_", "")
+        if "people" in kl and "ask" in kl:
+            return f"{k}: type={type(v).__name__}, raw={json.dumps(v)[:400]}"
+    return "no PAA-like key"
 
 @st.cache_data(ttl=300, show_spinner=False)
 def probe_scrapingdog_status(api_key: str) -> Dict[str, Any]:
@@ -218,7 +234,7 @@ class ScrapingdogClient:
             if not paa:
                 st.caption(
                     "ℹ️ No People Also Ask box in Google's response for this query "
-                    f"(response keys: {', '.join(list(data.keys())[:15])}). "
+                    f"[{describe_paa_raw(data)}] "
                     "Question-style autocomplete will be used instead."
                 )
 
