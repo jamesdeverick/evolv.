@@ -11,10 +11,10 @@ from collections import Counter
 from typing import Dict, List, Any
 
 FORMATS = [
-    ("what_is", r"^\s*what(?:'s| is| are)\b|\bdefinition\b|\bexplained\b|\bwhat is\b|\bwhat are\b"),
-    ("how_to", r"^\s*how (?:to|do|does|can|should)\b|\bstep[- ]by[- ]step\b|\btutorial\b|\bhow to\b"),
+    ("what_is", r"^\s*what(?:'s| is| are)\b|\bdefinition\b|\bexplained\b|\bwhat is\b|\bwhat are\b|\bwhat (?:they|it) (?:is|are)\b|\bdefinition\b"),
+    ("how_to", r"^\s*how (?:to|do|does|can|should)\b|\bstep[- ]by[- ]step\b|\btutorial\b|\bhow to\b|\bgetting started\b"),
     ("comparison", r"\bvs\.?\b|\bversus\b|\balternatives?\b|\bcompar(?:e|ison|ing)\b"),
-    ("list", r"^\s*\d+\s|^\s*(?:top|best)\b|\bbest\b|\btop \d+\b"),
+    ("list", r"^\s*\d+\s|^\s*(?:top|best)\b|\bbest\b|\btop \d+\b|\b\d+ (?:examples|things|ways|tips|steps|types)\b|\bexamples\b"),
     ("guide", r"\b(?:complete|ultimate|beginner'?s?|definitive)?\s*guide\b|\bhandbook\b|\bcheat ?sheet\b"),
 ]
 
