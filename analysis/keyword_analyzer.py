@@ -546,6 +546,13 @@ Return ONLY valid JSON (no markdown, no preamble):
             "gaps_to_exploit": [],
             "unique_angles": []
         }
+        # What page FORMAT is Google rewarding? (deterministic, no LLM)
+        try:
+            from analysis.serp_patterns import analyze_serp_patterns
+            all_titles = [s_.get("title", "") for s_ in (serp_results or [])]
+            serp_insights["serp_pattern"] = analyze_serp_patterns(all_titles, query_topic)
+        except Exception as e:
+            print(f"[WARNING] SERP pattern analysis failed: {e}")
 
         # 1. BRAINSTORM KEYWORDS WITH LLM
         t0 = time.time()

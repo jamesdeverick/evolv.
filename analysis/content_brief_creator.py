@@ -100,6 +100,19 @@ class ContentBriefCreator:
             serp_block += f"\n* **Gaps to Exploit in Competitors' Content:** {serp_insights.get('gaps_to_exploit', 'N/A')}"
             serp_block += f"\n* **Unique Angles to Pursue:** {serp_insights.get('unique_angles', 'N/A')}"
 
+        # SERP format rule + competitor headings: make sure the competitor
+        # analysis actually influences the title/H1/outline.
+        serp_format_rule = ""
+        if serp_insights:
+            serp_format_rule = (serp_insights.get("serp_pattern") or {}).get("guidance", "")
+        if serp_format_rule:
+            serp_block += "\n\n### SERP FORMAT RULE (applies to sections 1, 3 and 5):\n" + serp_format_rule
+        if competitor_analysis and competitor_analysis.get("common_headings"):
+            serp_block += (
+                "\n\n### Headings common to top-ranking competitor pages (ensure the outline covers these topics):\n- "
+                + "\n- ".join(competitor_analysis["common_headings"][:12])
+            )
+
         # Build entity guidance for generative search optimization
         entity_guidance = ""
         if competitor_analysis and self.nlp_available:

@@ -615,6 +615,15 @@ def show_step3():
         "common_themes": "", "gaps_to_exploit": "", "unique_angles": ""
     }
     
+    serp_pattern = (serp_summary.get("serp_pattern") or {}) if isinstance(serp_summary, dict) else {}
+    serp_format_block = serp_pattern.get("guidance", "")
+    comp_data = st.session_state.competitor_analysis or {}
+    comp_headings_block = ""
+    if comp_data.get("common_headings"):
+        comp_headings_block = (
+            "Headings that recur across the top competitor pages (cover these topics):\n- "
+            + "\n- ".join(comp_data["common_headings"][:12])
+        )
     default_review_prompt = f"""
 You are an SEO content strategist.
 Goal: produce a crisp gap/opportunity analysis and a **proposed content outline** for a NEW PAGE targeting:
@@ -633,6 +642,9 @@ SERP Insights (summary):
 - Gaps to exploit: {serp_summary.get('gaps_to_exploit','')}
 - Unique angles: {serp_summary.get('unique_angles','')}
 ---
+{serp_format_block}
+{comp_headings_block}
+---
 Candidate Keywords (top ~25):
 {top_kw_list or '[No table — rely on topic + SERP]'}
 ---
@@ -640,7 +652,7 @@ Please return a concise analysis with:
 1) Primary search intent & user needs
 2) Key gaps/opportunities (bullet points)
 3) A recommended **H2/H3 outline** with one-line summaries
-4) On-page SEO elements (Title/H1/Meta/URL)
+4) On-page SEO elements (Title/H1/Meta/URL) - the Title and H1 must follow the SERP FORMAT RULE above
 5) 3–5 FAQs with concise answers
 """.strip()
     
